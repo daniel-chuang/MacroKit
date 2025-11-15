@@ -1,0 +1,75 @@
+database:
+  type: duckdb
+  path: ./datalake/datalake.duckdb
+  start_date: "2020-01-01"
+  enums:
+    country_code: ["US", "GB"]
+    frequency_type:
+      ["BIZDAILY", "DAILY", "WEEKLY", "MONTHLY", "QUARTERLY", "ANNUAL"]
+    revision_type: ["PRELIMINARY", "REVISED", "FINAL"]
+    currency_code: ["USD", "GBP"]
+    unit_type: ["PERCENT", "INDEX", "BILLIONS", "MILLIONS", "THOUSANDS", "RATE"]
+
+storage:
+  format: parquet
+  compression: snappy
+  local_path: ./datalake/parquet/
+
+partitioning:
+  scheme: hive # Use hive partitioning: country=US/year=2024/month=01/
+
+tables:
+  # Market Data Tables
+  - name: treasury_yields
+    schema:
+      date: DATE
+      country: country_code
+      maturity: VARCHAR
+      yield: DOUBLE
+    partition_by: [country, date]
+
+  - name: swap_rates
+    schema:
+      date: DATE
+      country: country_code
+      currency: currency_code
+      tenor: VARCHAR
+      rate: DOUBLE
+    partition_by: [country, date]
+
+  # Economic Data Tables - Bitemporal Design
+  - name: economic_indicators
+    schema:
+      # Business time dimensions
+      period_start: DATE
+      period_end: DATE
+      period: VARCHAR # "2024-Q1", "2024-01", "2024"
+      frequency: frequency_type
+
+      # System time dimensions
+      release_date: DATE
+      version_date: TIMESTAMP
+      is_current: BOOLEAN
+
+      # Data attributes
+      country: country_code
+      indicator: VARCHAR
+      value: DOUBLE
+      unit: unit_type
+
+      # Metadata
+      source: VARCHAR
+      is_revised: BOOLEAN
+      revision_type: revision_type
+
+    partition_by: [country, period_start]
+
+  - name: reference_rates
+    schema:
+      date: DATE
+      country: country_code
+      central_bank: VARCHAR # FED, BOE, etc.
+      rate: DOUBLE
+      target_lower: DOUBLE
+      target_upper: DOUBLE
+    partition_by: [country, date]
