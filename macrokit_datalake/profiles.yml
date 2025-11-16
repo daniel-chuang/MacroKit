@@ -1,0 +1,9 @@
+macrokit:
+  target: dev
+
+  outputs:
+    dev:
+      type: duckdb
+      path: ../datalake/datalake.duckdb
+      schema: main
+      threads: 4

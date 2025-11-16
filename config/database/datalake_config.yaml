@@ -1,7 +1,6 @@
 database:
   type: duckdb
   path: ./datalake/datalake.duckdb
-  start_date: "2020-01-01"
   enums:
     country_code: ["US", "GB"]
     frequency_type:
@@ -9,6 +8,11 @@ database:
     revision_type: ["PRELIMINARY", "REVISED", "FINAL"]
     currency_code: ["USD", "GBP"]
     unit_type: ["PERCENT", "INDEX", "BILLIONS", "MILLIONS", "THOUSANDS", "RATE"]
+    yield_type: ["EOD", "BID", "OFFER", "MID"]
+    security_type: ["BILL", "NOTE", "BOND", "TIPS", "STRIP"]
+    curve_method: ["LINEAR", "CUBIC_SPLINE", "NELSON_SIEGEL", "SVENSSON"]
+    source_system: ["FEDINVEST", "BLOOMBERG", "REFINITIV", "UST", "FRED", "BOE"]
+    day_count_convention: ["ACT_ACT", "ACT_360", "ACT_365", "30_360", "30_360E"]
 
 storage:
   format: parquet
@@ -16,16 +20,47 @@ storage:
   local_path: ./datalake/parquet/
 
 partitioning:
-  scheme: hive # Use hive partitioning: country=US/year=2024/month=01/
+  scheme: hive
 
 tables:
-  # Market Data Tables
+  # ==========================================
+  # REFERENCE DATA (New)
+  # ==========================================
+
+  - name: ref_countries
+    schema:
+      country_code: country_code # PK
+      country_name: VARCHAR
+      central_bank: VARCHAR # "Federal Reserve", "Bank of England"
+      central_bank_abbrev: VARCHAR # "FED", "BOE"
+      default_currency: currency_code
+      market_timezone: VARCHAR
+      is_active: BOOLEAN
+    partition_by: []
+
+  - name: ref_sources
+    schema:
+      source_code: source_system # PK
+      source_name: VARCHAR
+      source_type: VARCHAR # "OFFICIAL", "VENDOR", "EXCHANGE"
+      reliability_tier: INTEGER # 1 (highest) to 5
+      api_endpoint: VARCHAR
+      contact_info: VARCHAR
+      is_active: BOOLEAN
+    partition_by: []
+
+  # ==========================================
+  # MARKET DATA TABLES
+  # ==========================================
+
   - name: treasury_yields
+    description: "Raw market yields from primary sources (on-the-run securities)"
     schema:
       date: DATE
-      country: country_code
-      maturity: VARCHAR
+      country: country_code # FK to ref_countries
+      maturity: VARCHAR # "3M", "2Y", "10Y" - actual traded securities
       yield: DOUBLE
+      source: source_system # FK to ref_sources
     partition_by: [country, date]
 
   - name: swap_rates
@@ -35,15 +70,195 @@ tables:
       currency: currency_code
       tenor: VARCHAR
       rate: DOUBLE
+      source: source_system
     partition_by: [country, date]
 
-  # Economic Data Tables - Bitemporal Design
+  # ==========================================
+  # BOND MASTER DATA
+  # ==========================================
+
+  - name: bond_master
+    schema:
+      # Identifiers
+      cusip: VARCHAR # PK
+      isin: VARCHAR
+      ticker: VARCHAR # FIXED TYPO: was "ticket"
+      country: country_code
+      currency: currency_code
+      security_type: security_type
+      issuer: VARCHAR
+
+      # Characteristics
+      coupon_rate: DOUBLE
+      issue_date: DATE
+      maturity_date: DATE
+      first_coupon_date: DATE
+      last_coupon_date: DATE
+      payment_frequency: INTEGER # 1, 2, 4
+      day_count_convention: day_count_convention # REMOVED DUPLICATE
+
+      # Terms and Classifications
+      original_term: VARCHAR # "2-Year", "10-Year", "30-Year"
+      current_term: VARCHAR
+      is_on_the_run: BOOLEAN
+      is_when_issued: BOOLEAN
+      is_stripped: BOOLEAN
+
+      # Auction data
+      auction_date: DATE
+      announcement_date: DATE
+      settlement_date: DATE
+      auction_high_yield: DOUBLE
+      auction_stop_out_yield: DOUBLE
+
+    partition_by: [country, maturity_date, security_type]
+
+  # ==========================================
+  # BOND PRICING
+  # ==========================================
+
+  - name: bond_prices
+    schema:
+      date: DATE
+      cusip: VARCHAR # FK to bond_master
+
+      # Prices
+      bid_price: DOUBLE
+      offer_price: DOUBLE
+      mid_price: DOUBLE
+      eod_price: DOUBLE
+
+      # Yields
+      bid_yield: DOUBLE
+      offer_yield: DOUBLE
+      mid_yield: DOUBLE
+      eod_yield: DOUBLE
+
+      # Spreads and analytics
+      duration: DOUBLE
+      modified_duration: DOUBLE
+      convexity: DOUBLE
+      dv01: DOUBLE
+
+      # Market data
+      volume: BIGINT
+      trade_count: INTEGER
+
+      # Data quality
+      source: source_system
+      data_quality_score: DOUBLE
+
+    partition_by: [date, cusip]
+
+  # ==========================================
+  # DERIVED YIELD CURVES
+  # ==========================================
+
+  - name: constant_treasury_yields
+    description: "Standardized constant maturity yields derived from market data"
+    schema:
+      date: DATE
+      country: country_code
+      yield_type: yield_type # EOD, BID, OFFER, MID
+
+      # Standard tenors
+      ct_1m: DOUBLE
+      ct_3m: DOUBLE
+      ct_6m: DOUBLE
+      ct_1y: DOUBLE
+      ct_2y: DOUBLE
+      ct_3y: DOUBLE
+      ct_5y: DOUBLE
+      ct_7y: DOUBLE
+      ct_10y: DOUBLE
+      ct_20y: DOUBLE
+      ct_30y: DOUBLE
+
+      # Methodology
+      curve_method: curve_method
+      source_table: VARCHAR # "treasury_yields" or "bond_prices"
+
+    partition_by: [country, date]
+
+  - name: yield_curves
+    description: "Full term structure with interpolated yields at all maturities"
+    schema:
+      date: DATE
+      country: country_code
+      curve_id: VARCHAR # "UST_EOD_NS", "GILT_MID_SPLINE"
+
+      # Term structure points
+      maturity_date: DATE
+      time_to_maturity: DOUBLE # Years
+      zero_rate: DOUBLE
+      discount_factor: DOUBLE
+      forward_rate: DOUBLE
+      par_yield: DOUBLE
+
+      # Curve metadata
+      interpolation_method: curve_method
+      extrapolation_method: VARCHAR
+      smoothing_parameter: DOUBLE
+
+      # Quality metrics
+      r_squared: DOUBLE
+      max_residual: DOUBLE
+      curve_quality_score: DOUBLE
+
+    partition_by: [country, date]
+
+  # ==========================================
+  # SPREAD ANALYSIS
+  # ==========================================
+
+  - name: yield_spreads
+    schema:
+      date: DATE
+      country: country_code
+      yield_type: yield_type
+
+      # Standard spreads (basis points)
+      spread_2s5s: DOUBLE
+      spread_2s10s: DOUBLE
+      spread_5s10s: DOUBLE
+      spread_5s30s: DOUBLE
+      spread_10s30s: DOUBLE
+
+      # Butterfly spreads
+      butterfly_2s5s10s: DOUBLE
+      butterfly_5s10s30s: DOUBLE
+
+      # Cross-country spreads
+      spread_vs_bund: DOUBLE
+      spread_vs_gilt: DOUBLE
+
+      # Calculation method
+      calculation_method: VARCHAR
+      source_curve_id: VARCHAR # FK to yield_curves.curve_id
+
+    partition_by: [country, date]
+
+  # ==========================================
+  # ECONOMIC INDICATORS (Bitemporal)
+  # ==========================================
+
   - name: economic_indicators
     schema:
+      # Data attributes
+      country: country_code
+      indicator: VARCHAR
+      # REMOVED: period VARCHAR - can be derived from period_start/period_end
+      value: DOUBLE
+      unit: unit_type
+
+      # Metadata
+      source: source_system
+      is_revised: BOOLEAN
+      revision_type: revision_type
+
       # Business time dimensions
       period_start: DATE
       period_end: DATE
-      period: VARCHAR # "2024-Q1", "2024-01", "2024"
       frequency: frequency_type
 
       # System time dimensions
@@ -51,25 +266,115 @@ tables:
       version_date: TIMESTAMP
       is_current: BOOLEAN
 
-      # Data attributes
-      country: country_code
-      indicator: VARCHAR
-      value: DOUBLE
-      unit: unit_type
-
-      # Metadata
-      source: VARCHAR
-      is_revised: BOOLEAN
-      revision_type: revision_type
-
     partition_by: [country, period_start]
 
   - name: reference_rates
     schema:
       date: DATE
       country: country_code
-      central_bank: VARCHAR # FED, BOE, etc.
       rate: DOUBLE
       target_lower: DOUBLE
       target_upper: DOUBLE
+      source: source_system
+    partition_by: [country, date]
+
+  # ==========================================
+  # FUTURES
+  # ==========================================
+
+  - name: bond_futures
+    schema:
+      date: DATE
+      country: country_code
+      contract_symbol: VARCHAR
+      expiry_month: VARCHAR
+
+      # Pricing
+      settlement_price: DOUBLE
+      volume: BIGINT
+      open_interest: BIGINT
+
+      # CTD Analysis
+      ctd_cusip: VARCHAR # FK to bond_master
+      ctd_conversion_factor: DOUBLE
+      ctd_gross_basis: DOUBLE
+      ctd_net_basis: DOUBLE
+
+      # Delivery options
+      delivery_start_date: DATE
+      delivery_end_date: DATE
+
+      source: source_system
+
+    partition_by: [country, date]
+
+  # ==========================================
+  # CALENDARS & SESSIONS
+  # ==========================================
+
+  - name: holiday_calendar
+    schema:
+      date: DATE
+      country: country_code
+      is_business_day: BOOLEAN
+      holiday_name: VARCHAR
+      holiday_type: VARCHAR # "BANK", "FEDERAL", "MARKET"
+    partition_by: [country, date]
+
+  - name: market_sessions
+    schema:
+      date: DATE
+      country: country_code
+      market: VARCHAR # "BOND", "REPO", "FUTURES"
+      session_start: TIME
+      session_end: TIME
+      is_half_day: BOOLEAN
+    partition_by: [country, date]
+
+  # ==========================================
+  # METADATA & LINEAGE
+  # ==========================================
+
+  - name: data_lineage
+    schema:
+      table_name: VARCHAR
+      date: DATE
+
+      # Source tracking
+      primary_source: source_system
+      backup_sources: VARCHAR[] # Could be source_system[] if DuckDB supports it
+
+      # Processing metadata
+      fetch_timestamp: TIMESTAMP
+      processing_timestamp: TIMESTAMP
+      records_fetched: INTEGER
+      records_processed: INTEGER
+      records_failed: INTEGER
+
+      # Quality metrics
+      data_completeness: DOUBLE # $0.0$ to $1.0$
+      source_reliability_score: DOUBLE
+      processing_errors: VARCHAR[]
+
+    partition_by: [table_name, date]
+
+  - name: curve_model_params
+    schema:
+      date: DATE
+      country: country_code
+      model_type: curve_method
+      curve_id: VARCHAR
+
+      # Model parameters (JSON for flexibility)
+      parameters: JSON
+
+      # Model performance
+      fit_quality: DOUBLE
+      validation_score: DOUBLE
+      benchmark_rmse: DOUBLE
+
+      # Metadata
+      calibration_timestamp: TIMESTAMP
+      model_version: VARCHAR
+
     partition_by: [country, date]

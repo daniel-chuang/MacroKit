@@ -1,0 +1,44 @@
+name: "macrokit_datalake"
+version: "1.0.0"
+config-version: 2
+
+profile: "macrokit"
+
+model-paths: ["models"]
+seed-paths: ["seeds"]
+test-paths: ["tests"]
+analysis-paths: ["analyses"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+
+target-path: "target"
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+models:
+  macrokit_datalake:
+    staging:
+      +materialized: view
+      +schema: staging
+
+    intermediate:
+      +materialized: ephemeral
+
+    marts:
+      +materialized: table
+      market_data:
+        +schema: market_data
+      economics:
+        +schema: economics
+
+seeds:
+  macrokit_datalake:
+    +schema: reference
+
+vars:
+  country_codes: ["US", "GB"]
+  yield_types: ["EOD", "BID", "OFFER", "MID"]
+  frequency_types:
+    ["BIZDAILY", "DAILY", "WEEKLY", "MONTHLY", "QUARTERLY", "ANNUAL"]
+  revision_types: ["PRELIMINARY", "REVISED", "FINAL"]

@@ -4,6 +4,10 @@ MacroKit is a comprehensive library for semi-systematic macro trading, with a fo
 
 Developed by Daniel Chuang
 
+## Technologies
+
+DuckDB + Parquet + dbt-core + dbt-duckdb
+
 ## Usage Setup
 
 1. Create a new conda environment
