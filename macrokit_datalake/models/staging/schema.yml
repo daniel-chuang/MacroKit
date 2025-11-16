@@ -1,0 +1,30 @@
+version: 2
+
+models:
+  - name: stg_treasury_yields
+    description: "Cleaned treasury yield data"
+
+    columns:
+      - name: date
+        description: "Observation date"
+        tests:
+          - not_null
+
+      - name: country
+        description: "Country code"
+        tests:
+          - not_null
+          - accepted_values:
+              values: ["US"]
+
+      - name: maturity
+        description: "Maturity label"
+        tests:
+          - not_null
+          - accepted_values:
+              values: ["1M", "3M", "6M", "1Y", "2Y", "5Y", "10Y", "30Y"]
+
+      - name: yield
+        description: "Yield value in percent"
+        tests:
+          - not_null

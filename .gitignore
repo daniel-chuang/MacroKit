@@ -18,7 +18,7 @@ logs/
 *.duckdb.wal
 
 # Parquet file results
-datalake/
+datalake/parquet
 
 # OS
 .DS_Store

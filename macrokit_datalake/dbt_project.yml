@@ -42,3 +42,9 @@ vars:
   frequency_types:
     ["BIZDAILY", "DAILY", "WEEKLY", "MONTHLY", "QUARTERLY", "ANNUAL"]
   revision_types: ["PRELIMINARY", "REVISED", "FINAL"]
+  currency_codes: ["USD", "GBP"]
+  unit_types: ["PERCENT", "INDEX", "BILLIONS", "MILLIONS", "THOUSANDS", "RATE"]
+  security_types: ["BILL", "NOTE", "BOND", "TIPS", "STRIP"]
+  curve_methods: ["LINEAR", "CUBIC_SPLINE", "NELSON_SIEGEL", "SVENSSON"]
+  source_systems: ["FEDINVEST", "BLOOMBERG", "REFINITIV", "UST", "FRED", "BOE"]
+  day_count_conventions: ["ACT_ACT", "ACT_360", "ACT_365", "30_360", "30_360E"]

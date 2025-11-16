@@ -1,0 +1,5 @@
+source_code,source_name,source_type,priority,api_url,contact_email,is_active
+FRED,Federal Reserve Economic Data,OFFICIAL,1,https://api.stlouisfed.org/fred/,fred@stlouisfed.org,true
+BOE,Bank of England,OFFICIAL,1,https://www.bankofengland.co.uk/,enquiries@bankofengland.co.uk,true
+BLOOMBERG,Bloomberg Terminal,VENDOR,2,,,true
+REFINITIV,Refinitiv Eikon,VENDOR,2,,,true

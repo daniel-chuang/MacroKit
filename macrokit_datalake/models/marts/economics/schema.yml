@@ -1,0 +1,35 @@
+version: 2
+
+models:
+  - name: fct_economic_indicators
+    description: "Economic indicators fact table"
+
+    columns:
+      - series_id:
+          description: "Unique identifier for the economic series"
+          tests:
+            - not_null
+      - observation_date:
+          description: "Date the event occurred"
+          tests:
+            - not_null
+      - value:
+          description: "Observed value of the economic indicator"
+      - realtime_start:
+          description: "When the vintage became available"
+      - realtime_end:
+          description: "When the vintage was replaced"
+      - country:
+          description: "Country associated with the economic indicator"
+      - indicator:
+          description: "Name of the economic indicator"
+      - unit:
+          description: "Unit of measurement for the indicator"
+      - source:
+          description: "Data source of the economic indicator"
+      - frequency:
+          description: "Frequency of the data observation"
+      - is_current:
+          description: "Flag indicating if this is the most current observation"
+      - _loaded_at:
+          description: "Timestamp when the record was loaded into the data lake"

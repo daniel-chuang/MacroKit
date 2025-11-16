@@ -1,0 +1,63 @@
+database:
+  type: duckdb
+  path: ./datalake/datalake.duckdb
+
+storage:
+  format: parquet
+  compression: snappy
+  local_path: ./datalake/parquet/
+
+partitioning:
+  scheme: hive
+
+# Raw staging tables (for data ingestion scripts)
+raw_tables:
+  - name: treasury_yields
+    schema:
+      series_id: VARCHAR
+      date: DATE
+      yield: DOUBLE
+      maturity: VARCHAR
+      country: VARCHAR
+      source: VARCHAR
+      _loaded_at: TIMESTAMP
+    partition_by: []
+
+  - name: economic_indicators
+    schema:
+      series_id: VARCHAR
+      observation_date: DATE # Date the event occurred
+      value: DOUBLE
+      realtime_start: DATE # When the vintage became available
+      realtime_end: DATE # When the vintage was replaced
+      country: VARCHAR
+      indicator: VARCHAR
+      unit: VARCHAR
+      source: VARCHAR
+      frequency: VARCHAR
+      _loaded_at: TIMESTAMP
+    partition_by: []
+
+# Reference tables (populated by scripts, not DBT)
+reference_tables:
+  - name: ref_countries
+    schema:
+      country_code: country_code
+      country_name: VARCHAR
+      central_bank: VARCHAR
+      central_bank_abbrev: VARCHAR
+      default_currency: currency_code
+      market_timezone: VARCHAR
+      is_active: BOOLEAN
+    partition_by: []
+
+  - name: ref_sources
+    schema:
+      source_code: source_system
+      source_name: VARCHAR
+      source_type: VARCHAR
+      reliability_tier: INTEGER
+      api_endpoint: VARCHAR
+      contact_info: VARCHAR
+      is_active: BOOLEAN
+    partition_by: []

@@ -1,0 +1,3 @@
+country_code,country_name,central_bank,central_bank_abbrev,default_currency,market_timezone,is_active
+US,United States,Federal Reserve,FED,USD,America/New_York,true
+GB,United Kingdom,Bank of England,BOE,GBP,Europe/London,true

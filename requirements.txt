@@ -1,14 +1,41 @@
-# dbt
+# Core DBT
 dbt-core==1.8.0
 dbt-duckdb==1.8.0
 
-# Data fetching
+# Database
+duckdb==0.10.0
+
+# Data fetching and processing
 fredapi==0.5.1
 pandas==2.2.0
-python-dotenv==1.0.0
+numpy==1.24.3
 
-# CLI
+# Configuration and environment
+python-dotenv==1.0.0
+pyyaml==6.0.1
+
+# CLI and logging
 absl-py==2.1.0
 
-# DuckDB
-duckdb==0.10.0
+# Essential utilities
+requests==2.31.0
+
+# Testing
+pytest==7.4.3
+pytest-cov==4.1.0
+pytest-mock==3.12.0
+
+# Code quality
+black==23.11.0
+flake8==6.1.0
+isort==5.12.0
+mypy==1.7.0
+
+# Documentation
+sphinx==7.2.6
+sphinx-rtd-theme==1.3.0
+
+# Development tools
+pre-commit==3.5.0
+jupyter==1.0.0
+ipython==8.17.2
