@@ -272,10 +272,6 @@ def setup_parquet_storage(config: Dict[str, Any]) -> None:
 
     local_path.mkdir(parents=True, exist_ok=True)
 
-    # Create subdirectories for organization
-    (local_path / "raw").mkdir(exist_ok=True)
-    (local_path / "processed").mkdir(exist_ok=True)
-
     logging.info(f"Created parquet storage at {local_path}")
 
 
