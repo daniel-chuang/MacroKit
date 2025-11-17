@@ -6,8 +6,9 @@ import yaml
 
 # Import processors and extractors
 from extractors.fred import FREDExtractor
-from processors.treasury import TreasuryProcessor
+from processors.market import MarketProcessor
 from processors.economic import EconomicProcessor
+from processors.treasury import TreasuryYieldProcessor
 
 FLAGS = flags.FLAGS
 
@@ -87,16 +88,24 @@ def main(argv):
 
     logging.info("\nIngesting raw data into database...")
 
+    # Process market data
+    if ingest_all or "us_market_data" in tables_to_ingest:
+        logging.info("Ingesting market data...")
+        market_processor = MarketProcessor(fred_extractor, conn)
+        market_processor.process(
+            start_date=start_date, end_date=end_date, update_only=FLAGS.update_only
+        )
+
     # Process treasury yields
-    if ingest_all or "treasury_yields" in tables_to_ingest:
+    if ingest_all or "us_treasury_yields" in tables_to_ingest:
         logging.info("Ingesting treasury yields...")
-        treasury_processor = TreasuryProcessor(fred_extractor, conn)
+        treasury_processor = TreasuryYieldProcessor(fred_extractor, conn)
         treasury_processor.process(
             start_date=start_date, end_date=end_date, update_only=FLAGS.update_only
         )
 
     # Process economic indicators
-    if ingest_all or "economic_indicators" in tables_to_ingest:
+    if ingest_all or "us_economic_indicators" in tables_to_ingest:
         logging.info("Ingesting economic indicators WITH VINTAGES...")
         economic_processor = EconomicProcessor(fred_extractor, conn)
         economic_processor.process(
@@ -106,7 +115,7 @@ def main(argv):
     # Close connection
     conn.close()
 
-    logging.info("\n" + "=" * 60)
+    logging.info("=" * 60)
     logging.info("Raw data ingestion completed!")
     logging.info("Next step: Run DBT to transform data (dbt run)")
     logging.info("=" * 60)

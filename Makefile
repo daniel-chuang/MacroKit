@@ -101,11 +101,10 @@ env-info: ## Show conda environment info
 # DATABASE INITIALIZATION
 # ============================================================================
 
-init: check-conda-env check-config ## Initialize the data lake (OVERWRITE=1 for clean slate, RAW_ONLY=1 for raw tables only)
+init: check-conda-env check-config ## Initialize the data lake (OVERWRITE=1 for clean slate)
 	@printf "$(YELLOW)Initializing data lake...$(RESET)\n"
 	@CMD="$(CONDA) run -n $(CONDA_ENV) python $(INGEST_DIR)/initialize.py"; \
 	if [ "$(OVERWRITE)" = "1" ]; then CMD="$$CMD --overwrite"; fi; \
-	if [ "$(RAW_ONLY)" = "1" ]; then CMD="$$CMD --raw_only"; fi; \
 	$$CMD
 	@printf "$(GREEN)✓ Data lake initialized$(RESET)\n"
 
@@ -226,24 +225,3 @@ reset: ## Reset everything (dangerous!)
 	else \
 		printf "$(YELLOW)Reset cancelled$(RESET)\n"; \
 	fi
-
-# ============================================================================
-# WORKFLOW SHORTCUTS
-# ============================================================================
-
-quick-start: setup check-config init ## Quick start: setup + init + treasury data + transform
-	@$(MAKE) ingest TABLES=treasury_yields
-	@$(MAKE) dbt-run
-	@printf "$(GREEN)✓ Quick start complete! Treasury data loaded and transformed.$(RESET)\n"
-
-daily-update: check-env ## Daily workflow: update all data + transform
-	@$(MAKE) ingest
-	@$(MAKE) dbt-run
-	@$(MAKE) count-records
-	@printf "$(GREEN)✓ Daily update complete!$(RESET)\n"
-
-pipeline: ## Full pipeline: ingest + transform
-	@$(MAKE) ingest TABLES=treasury_yields
-	@$(MAKE) dbt-run
-	@$(MAKE) count-records
-	@printf "$(GREEN)✓ Full pipeline complete!$(RESET)\n"

@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 import pandas as pd
 from absl import logging
+import os
 
 
 class BaseProcessor(ABC):
@@ -10,10 +11,11 @@ class BaseProcessor(ABC):
     def __init__(self, extractor, conn):
         self.extractor = extractor
         self.conn = conn
+        self._series_config = None
 
     @abstractmethod
-    def get_series_config(self):
-        """Return configuration for series to process"""
+    def get_config_file_name(self):
+        """Return the CSV filename for this processor's configuration"""
         pass
 
     @abstractmethod
@@ -26,11 +28,66 @@ class BaseProcessor(ABC):
         """Transform raw data to standard format"""
         pass
 
+    def get_series_config(self):
+        """Load series configuration from CSV"""
+        if self._series_config is None:
+            # Path to the seeds directory
+            config_file = self.get_config_file_name()
+            seeds_path = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+                "seeds",
+                config_file,
+            )
+
+            try:
+                df = pd.read_csv(seeds_path)
+
+                # Filter to only active series if 'active' column exists
+                if "active" in df.columns:
+                    df = df[df["active"] == True]
+
+                # Convert to dictionary format
+                self._series_config = self._parse_config_df(df)
+
+                logging.info(
+                    f"Loaded {len(self._series_config)} series from {config_file}"
+                )
+
+            except FileNotFoundError:
+                logging.error(f"Configuration CSV not found at {seeds_path}")
+                self._series_config = {}
+            except Exception as e:
+                logging.error(f"Error loading configuration CSV: {e}")
+                self._series_config = {}
+
+        return self._series_config
+
+    def _parse_config_df(self, df):
+        """
+        Parse configuration DataFrame into dictionary format.
+        Override this in subclasses to customize parsing logic.
+
+        Default implementation: assumes 'series_id' column exists and all other
+        columns become the series_info dictionary.
+        """
+        config = {}
+
+        if "series_id" not in df.columns:
+            logging.error("Configuration CSV must have 'series_id' column")
+            return config
+
+        for _, row in df.iterrows():
+            series_id = row["series_id"]
+            # Convert row to dict, excluding series_id
+            series_info = row.drop("series_id").to_dict()
+            config[series_id] = series_info
+
+        return config
+
     def process(self, start_date, end_date, update_only=False, **kwargs):
         """Main processing method - template pattern"""
         series_config = self.get_series_config()
         table_name = self.get_table_name()
-
         logging.info(f"Processing {len(series_config)} series for {table_name}")
 
         for series_id, series_info in series_config.items():
@@ -83,9 +140,11 @@ class BaseProcessor(ABC):
         """Insert data into database"""
         table_name = self.get_table_name()
 
+        # Ensure DataFrame has a clean integer index starting from 0
+        df = df.reset_index(drop=True)
+
         # Get column names from DataFrame
         columns = ", ".join(df.columns)
-
         query = f"""
             INSERT INTO {table_name} ({columns})
             SELECT * FROM df
@@ -96,10 +155,8 @@ class BaseProcessor(ABC):
     def add_common_columns(self, df, **kwargs):
         """Add common columns that most processors need"""
         df["_loaded_at"] = datetime.now()
-
         if "source" in kwargs:
             df["source"] = kwargs["source"]
         if "country" in kwargs:
             df["country"] = kwargs["country"]
-
         return df

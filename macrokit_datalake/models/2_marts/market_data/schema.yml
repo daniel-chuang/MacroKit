@@ -1,25 +1,5 @@
 version: 2
 
 models:
-  - name: fct_treasury_yields
+  - name: fct_us_market_data
     description: "Treasury yields fact table"
-
-  - name: fct_yield_spreads
-    description: "Calculated yield curve spreads"
-
-    columns:
-      - name: date
-        description: "Observation date"
-        tests:
-          - not_null
-
-      - name: spread_2s10s
-        description: "2Y-10Y spread in basis points"
-        tests:
-          - not_null
-
-      - name: curve_shape
-        description: "Yield curve shape classification"
-        tests:
-          - accepted_values:
-              values: ["NORMAL", "INVERTED", "FLAT"]

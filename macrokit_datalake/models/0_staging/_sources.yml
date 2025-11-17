@@ -6,7 +6,7 @@ sources:
     schema: raw
 
     tables:
-      - name: treasury_yields
+      - name: us_market_data
         description: "Raw treasury yield data"
         loaded_at_field: _loaded_at
 
@@ -22,6 +22,6 @@ sources:
             tests:
               - not_null
 
-      - name: economic_indicators
+      - name: us_economic_indicators
         description: "Raw economic indicator vintages"
         loaded_at_field: _loaded_at

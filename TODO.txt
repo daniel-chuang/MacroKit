@@ -1,0 +1,7 @@
+- [X] Setup DBT + Makefile
+- [X] Setup base ingest code for market data, economic data, and treasury CMT yields
+- [ ] Get CUSIP level data 
+- [ ] Get swaps data
+- [ ] Get repo data
+- [ ] Get futures data
+- [ ] Get economic fore casts data from philly SFP

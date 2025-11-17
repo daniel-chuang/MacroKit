@@ -1,58 +1,148 @@
 import pandas as pd
 from datetime import datetime
 from processors.base import BaseProcessor
+from absl import logging
 
 
-class TreasuryProcessor(BaseProcessor):
-    """Process treasury yield data"""
+class TreasuryYieldProcessor(BaseProcessor):
+    """Process Treasury Constant Maturity (CMT) yield curves"""
 
-    def get_series_config(self):
-        """Treasury series configuration"""
-        return {
-            "DGS1MO": {"maturity": "1M"},
-            "DGS3MO": {"maturity": "3M"},
-            "DGS6MO": {"maturity": "6M"},
-            "DGS1": {"maturity": "1Y"},
-            "DGS2": {"maturity": "2Y"},
-            "DGS3": {"maturity": "3Y"},
-            "DGS5": {"maturity": "5Y"},
-            "DGS7": {"maturity": "7Y"},
-            "DGS10": {"maturity": "10Y"},
-            "DGS20": {"maturity": "20Y"},
-            "DGS30": {"maturity": "30Y"},
-        }
+    def get_config_file_name(self):
+        """Return CSV filename for treasury yields configuration"""
+        return "ref_us_treasury_yields.csv"
 
     def get_table_name(self):
         """Return table name"""
-        return "raw.treasury_yields"
+        return "raw.us_treasury_yields"
+
+    def _parse_config_df(self, df):
+        """Custom parsing for treasury yield configuration"""
+        config = {}
+
+        for _, row in df.iterrows():
+            config[row["series_id"]] = {
+                "indicator": row["indicator"],
+                "tenor": row["tenor"],
+                "curve_type": row["curve_type"],
+            }
+
+        return config
 
     def transform_data(self, raw_data, series_info, **kwargs):
-        """Transform treasury data"""
+        """Transform Treasury yield data for curve structure"""
+        if raw_data is None or len(raw_data) == 0:
+            return None
+
         df = raw_data.reset_index()
         df.columns = ["date", "yield"]
 
         # Add series-specific info
-        df["maturity"] = series_info["maturity"]
         df["series_id"] = kwargs["series_id"]
+        df["tenor"] = series_info["tenor"]
+        df["curve_type"] = series_info["curve_type"]
+        df["indicator"] = series_info["indicator"]
 
         # Add common columns
-        df = self.add_common_columns(df, source="FRED", country="US")
+        df = self.add_common_columns(df, source="FRED")
 
         # Type conversions
         df["date"] = pd.to_datetime(df["date"]).dt.date
+        df["yield"] = pd.to_numeric(df["yield"], errors="coerce")
+
+        # Convert from percentage to decimal ($4.23 \to 0.0423$)
+        df["yield"] = df["yield"] / 100.0
+
+        # Add bid/ask placeholders
+        df["bid"] = None
+        df["ask"] = None
+
+        # Drop NaN yields
+        df = df.dropna(subset=["yield"])
+
+        # Sort and reset index before returning
+        df = df.sort_values(["date", "tenor"]).reset_index(drop=True)
 
         return df
 
     def _filter_for_updates(self, df, series_info):
-        """Filter for treasury-specific updates"""
-        maturity = series_info["maturity"]
+        """Filter for Treasury yield updates - by tenor and curve_type"""
+        if len(df) == 0:
+            return df
+
+        tenor = df["tenor"].iloc[0]
+        curve_type = df["curve_type"].iloc[0]
 
         last_date = self.conn.execute(
-            "SELECT MAX(date) FROM raw.treasury_yields WHERE maturity = ? AND country = ?",
-            [maturity, "US"],
+            f"""
+            SELECT MAX(date) 
+            FROM {self.get_table_name()} 
+            WHERE tenor = ? AND curve_type = ?
+            """,
+            [tenor, curve_type],
         ).fetchone()[0]
 
         if last_date:
-            df = df[df["date"] > last_date]
+            df = df[df["date"] > last_date].reset_index(drop=True)
+            logging.info(
+                f"Filtered to {len(df)} new observations after {last_date} for {tenor} {curve_type}"
+            )
 
         return df
+
+    def _process_series(
+        self, series_id, series_info, start_date, end_date, update_only, **kwargs
+    ):
+        """Override to add Treasury-specific logging"""
+        logging.info(
+            f"Fetching Treasury CMT for {series_info['tenor']} ({series_info['indicator']})..."
+        )
+
+        super()._process_series(
+            series_id, series_info, start_date, end_date, update_only, **kwargs
+        )
+
+        if hasattr(self, "_last_processed_df") and self._last_processed_df is not None:
+            df = self._last_processed_df
+            logging.info(f"  - {len(df)} observations")
+            logging.info(f"  - Date range: {df['date'].min()} to {df['date'].max()}")
+            if df["yield"].notna().any():
+                logging.info(
+                    f"  - Yield range: {df['yield'].min()*100:.2f}% to {df['yield'].max()*100:.2f}%"
+                )
+
+    def _insert_data(self, df):
+        """Override to store df for statistics and insert"""
+        self._last_processed_df = df
+        super()._insert_data(df)
+
+    def get_curve_for_date(self, date, curve_type="CMT"):
+        """
+        Helper method to retrieve full curve for a specific date.
+
+        Args:
+            date: Date to retrieve curve for
+            curve_type: 'CMT', 'PAR', 'SPOT', or 'FORWARD'
+
+        Returns:
+            DataFrame with columns [tenor, yield]
+        """
+        query = f"""
+        SELECT tenor, yield
+        FROM {self.get_table_name()}
+        WHERE date = ? AND curve_type = ?
+        ORDER BY 
+            CASE tenor
+                WHEN '1M' THEN 1
+                WHEN '3M' THEN 2
+                WHEN '6M' THEN 3
+                WHEN '1Y' THEN 4
+                WHEN '2Y' THEN 5
+                WHEN '3Y' THEN 6
+                WHEN '5Y' THEN 7
+                WHEN '7Y' THEN 8
+                WHEN '10Y' THEN 9
+                WHEN '20Y' THEN 10
+                WHEN '30Y' THEN 11
+            END
+        """
+        return self.conn.execute(query, [date, curve_type]).df()

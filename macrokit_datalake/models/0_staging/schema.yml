@@ -1,7 +1,7 @@
 version: 2
 
 models:
-  - name: stg_treasury_yields
+  - name: stg_us_market_data
     description: "Cleaned treasury yield data"
 
     columns:

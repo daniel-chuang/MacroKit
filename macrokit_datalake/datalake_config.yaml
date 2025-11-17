@@ -6,58 +6,518 @@ storage:
   format: parquet
   compression: snappy
   local_path: ./datalake/parquet/
-
-partitioning:
-  scheme: hive
+  partitioning:
+    scheme: hive
 
 # Raw staging tables (for data ingestion scripts)
 raw_tables:
-  - name: treasury_yields
+  - name: us_market_data
+    description: >
+      Scalar market factors and regime indicators. Single value per date per indicator.
+      Use for macro analysis, factor models, and correlation studies.
+      NOT for term structure data (use us_treasury_yields, us_swap_rates instead).
     schema:
-      series_id: VARCHAR
-      date: DATE
-      yield: DOUBLE
-      maturity: VARCHAR
-      country: VARCHAR
-      source: VARCHAR
-      _loaded_at: TIMESTAMP
-    partition_by: []
+      series_id:
+        type: VARCHAR
+        description: "FRED series identifier (e.g., 'DFF', 'SOFR', 'VIXCLS')"
+      date:
+        type: DATE
+        description: "Observation date"
+      value:
+        type: DOUBLE
+        description: "Observed value (rates in decimal: 0.0457 = 4.57%)"
+      indicator:
+        type: VARCHAR
+        description: "Human-readable name (e.g., 'Federal Funds Rate', 'VIX')"
+      asset_class:
+        type: VARCHAR
+        description: "Category: RATE, VOLATILITY, FX, COMMODITY, SPREAD, MONETARY"
+      maturity:
+        type: VARCHAR
+        description: "Maturity for single-point rates (e.g., 'O/N', '30D'). NULL for non-maturity assets"
+      source:
+        type: VARCHAR
+        description: "Data provider (e.g., 'FRED', 'Bloomberg')"
+      _loaded_at:
+        type: TIMESTAMP
+        description: "ETL timestamp"
+    partition_by: [asset_class]
+    examples:
+      - "Fed Funds Rate (single value per day)"
+      - "SOFR O/N fixing"
+      - "VIX (30-day implied volatility)"
+      - "Dollar Index (DXY)"
+      - "WTI Crude Oil price"
+      - "10Y-2Y spread (scalar spread, not curve)"
 
-  - name: economic_indicators
+  - name: us_treasury_yields
+    description: >
+      Constant Maturity Treasury (CMT) yields and derived curves. Multiple tenors per date.
+      CMTs are interpolated/fitted yields representing what a Treasury would yield at exact maturities.
+      Use for curve analysis, term structure modeling, PCA, and yield curve strategies.
     schema:
-      series_id: VARCHAR
-      observation_date: DATE # Date the event occurred
-      value: DOUBLE
-      realtime_start: DATE # When the vintage became available
-      realtime_end: DATE # When the vintage was replaced
-      country: VARCHAR
-      indicator: VARCHAR
-      unit: VARCHAR
-      source: VARCHAR
-      frequency: VARCHAR
-      _loaded_at: TIMESTAMP
+      series_id:
+        type: VARCHAR
+        description: "FRED series ID (e.g., 'DGS1MO', 'DGS10')"
+      date:
+        type: DATE
+        description: "Curve date"
+      tenor:
+        type: VARCHAR
+        description: "Time to maturity (e.g., '1M', '3M', '6M', '1Y', '2Y', '3Y', '5Y', '7Y', '10Y', '20Y', '30Y')"
+      yield:
+        type: DOUBLE
+        description: "Yield in decimal (0.0423 = 4.23%)"
+      indicator:
+        type: VARCHAR
+        description: "Human-readable name (e.g., 'Federal Funds Rate', 'VIX')"
+      curve_type:
+        type: VARCHAR
+        description: "CMT (constant maturity), PAR (par curve), SPOT (zero curve), FORWARD (forward curve)"
+      bid:
+        type: DOUBLE
+        description: "Bid yield (if available)"
+      ask:
+        type: DOUBLE
+        description: "Ask yield (if available)"
+      source:
+        type: VARCHAR
+        description: "FRED (published CMT), UST (Treasury direct), FITTED (model-derived)"
+      _loaded_at:
+        type: TIMESTAMP
+        description: "ETL timestamp"
+    partition_by: [curve_type]
+    indexes:
+      - columns: [date, tenor, curve_type]
+        description: "Primary query pattern for curve operations"
+    examples:
+      - "Daily CMT curve from FRED (11 tenors)"
+      - "Fitted zero curve from Nelson-Siegel-Svensson model"
+      - "Par curve for bond pricing"
+
+  - name: us_swap_rates
+    description: >
+      Interest rate swap curves (SOFR OIS, legacy LIBOR). Multiple tenors per date.
+      Used for swap valuation, hedge ratio calculation, and relative value analysis vs Treasuries.
+    schema:
+      date:
+        type: DATE
+        description: "Curve date"
+      tenor:
+        type: VARCHAR
+        description: "Swap tenor (e.g., '1Y', '2Y', '5Y', '10Y', '30Y')"
+      rate:
+        type: DOUBLE
+        description: "Swap fixed rate in decimal (0.0412 = 4.12%)"
+      curve_type:
+        type: VARCHAR
+        description: "SOFR_OIS, LIBOR (legacy), FED_FUNDS_OIS"
+      quote_type:
+        type: VARCHAR
+        description: "MID, BID, ASK"
+      source:
+        type: VARCHAR
+        description: "DTCC, Bloomberg, ICAP, etc."
+      _loaded_at:
+        type: TIMESTAMP
+        description: "ETL timestamp"
+    partition_by: [curve_type]
+    examples:
+      - "SOFR OIS curve (1M-30Y)"
+      - "Legacy 3M LIBOR swap curve"
+
+  - name: us_swaption_vols
+    description: >
+      Swaption implied volatilities. Three-dimensional surface: expiry × tenor × strike.
+      Used for swaption pricing (SABR model), volatility trading, and hedging.
+    schema:
+      date:
+        type: DATE
+        description: "Volatility surface date"
+      expiry:
+        type: VARCHAR
+        description: "Option expiry (e.g., '1M', '3M', '6M', '1Y', '2Y', '5Y', '10Y')"
+      tenor:
+        type: VARCHAR
+        description: "Underlying swap tenor (e.g., '2Y', '5Y', '10Y', '30Y')"
+      strike:
+        type: VARCHAR
+        description: "Strike descriptor: 'ATM', 'ATM+25', 'ATM+50', 'ATM-25', or absolute rate"
+      vol_type:
+        type: VARCHAR
+        description: "NORMAL (basis points), LOGNORMAL (Black vol)"
+      volatility:
+        type: DOUBLE
+        description: "Implied volatility (bps for normal, decimal for lognormal)"
+      delta:
+        type: DOUBLE
+        description: "Option delta (for smile interpolation)"
+      source:
+        type: VARCHAR
+        description: "Bloomberg, ICAP, MarketAxess"
+      _loaded_at:
+        type: TIMESTAMP
+        description: "ETL timestamp"
+    partition_by: [date]
+    examples:
+      - "3M×10Y ATM swaption (3-month option on 10-year swap)"
+      - "1Y×5Y volatility smile (multiple strikes)"
+
+  - name: us_capfloor_vols
+    description: >
+      Interest rate cap and floor implied volatilities.
+      Used for cap/floor pricing and hedging structured products.
+    schema:
+      date:
+        type: DATE
+        description: "Volatility date"
+      tenor:
+        type: VARCHAR
+        description: "Cap/floor tenor (e.g., '1Y', '2Y', '5Y', '10Y')"
+      strike:
+        type: DOUBLE
+        description: "Strike rate in decimal"
+      instrument_type:
+        type: VARCHAR
+        description: "CAP or FLOOR"
+      volatility:
+        type: DOUBLE
+        description: "Implied volatility"
+      curve_type:
+        type: VARCHAR
+        description: "SOFR, LIBOR (legacy)"
+      source:
+        type: VARCHAR
+        description: "Data provider"
+      _loaded_at:
+        type: TIMESTAMP
+        description: "ETL timestamp"
+    partition_by: [instrument_type]
+
+  - name: us_economic_indicators
+    description: >
+      Macroeconomic time series with vintage tracking (real-time data).
+      Each observation has realtime_start/end to track revisions.
+      Use for nowcasting, policy analysis, and understanding data revision impact.
+    schema:
+      series_id:
+        type: VARCHAR
+        description: "FRED series ID (e.g., 'GDP', 'UNRATE', 'CPIAUCSL')"
+      category:
+        type: VARCHAR
+        description: "Category: OUTPUT, LABOR_MARKET, INFLATION, HOUSING, TRADE, etc."
+      subcategory:
+        type: VARCHAR
+        description: "More specific grouping within category"
+      observation_date:
+        type: DATE
+        description: "Date the economic event occurred"
+      value:
+        type: DOUBLE
+        description: "Observed/estimated value"
+      realtime_start:
+        type: DATE
+        description: "When this vintage became available (publication date)"
+      realtime_end:
+        type: DATE
+        description: "When this vintage was superseded by revision"
+      indicator:
+        type: VARCHAR
+        description: "Human-readable name (e.g., 'GDP', 'Unemployment Rate')"
+      unit:
+        type: VARCHAR
+        description: "Measurement unit (e.g., 'Billions of Dollars', 'Percent')"
+      source:
+        type: VARCHAR
+        description: "Data provider"
+      frequency:
+        type: VARCHAR
+        description: "Monthly, Quarterly, Annual"
+      _loaded_at:
+        type: TIMESTAMP
+        description: "ETL timestamp"
     partition_by: []
+    examples:
+      - "GDP with revision history"
+      - "CPI (headline and core)"
+      - "Unemployment rate vintages"
+
+  - name: us_treasury_prices
+    description: >
+      Actual traded Treasury security prices and yields by CUSIP.
+      Use for fitting yield curves, relative value analysis, and liquidity studies.
+    schema:
+      cusip:
+        type: VARCHAR
+        description: "Treasury CUSIP identifier"
+      date:
+        type: DATE
+        description: "Trading date"
+      price_clean:
+        type: DOUBLE
+        description: "Price excluding accrued interest"
+      price_dirty:
+        type: DOUBLE
+        description: "Price including accrued interest"
+      yield:
+        type: DOUBLE
+        description: "Yield-to-maturity in decimal"
+      bid:
+        type: DOUBLE
+        description: "Bid price"
+      ask:
+        type: DOUBLE
+        description: "Ask price"
+      bid_yield:
+        type: DOUBLE
+        description: "Yield at bid"
+      ask_yield:
+        type: DOUBLE
+        description: "Yield at ask"
+      volume:
+        type: BIGINT
+        description: "Trading volume (if available)"
+      source:
+        type: VARCHAR
+        description: "FINRA, DTCC, WSJ"
+      _loaded_at:
+        type: TIMESTAMP
+        description: "ETL timestamp"
+    partition_by: [date]
+    indexes:
+      - columns: [cusip, date]
+        description: "Primary lookup pattern"
+
+  - name: us_auctions
+    description: >
+      Treasury auction results. Captures primary market issuance data.
+      Use for supply analysis, auction tail studies, and dealer positioning.
+    schema:
+      cusip:
+        type: VARCHAR
+        description: "Issued CUSIP"
+      auction_date:
+        type: DATE
+        description: "Auction settlement date"
+      issue_date:
+        type: DATE
+        description: "When security starts accruing interest"
+      maturity_date:
+        type: DATE
+        description: "Final maturity"
+      int_rate:
+        type: DOUBLE
+        description: "Coupon rate in decimal"
+      high_investment_rate:
+        type: DOUBLE
+        description: "Highest accepted yield"
+      security_type:
+        type: VARCHAR
+        description: "Bill, Note, Bond, TIPS, FRN"
+      security_term:
+        type: VARCHAR
+        description: "Original term (e.g., '10-Year', '2-Year')"
+      total_accepted_amt:
+        type: BIGINT
+        description: "Total amount issued (dollars)"
+      competitive_accepted_amt:
+        type: BIGINT
+        description: "Competitive bids accepted"
+      noncompetitive_accepted_amt:
+        type: BIGINT
+        description: "Non-competitive bids accepted"
+      ust_label:
+        type: VARCHAR
+        description: "Treasury label (e.g., '912828YK0')"
+      source:
+        type: VARCHAR
+        description: "TreasuryDirect"
+      _loaded_at:
+        type: TIMESTAMP
+        description: "ETL timestamp"
+    partition_by: [auction_date]
+
+  - name: fitted_curve_parameters
+    description: >
+      Stored parameters from curve fitting models (Nelson-Siegel-Svensson, Smith-Wilson, etc.).
+      Use for model comparison, parameter stability analysis, and curve reconstruction.
+    schema:
+      date:
+        type: DATE
+        description: "Curve date"
+      curve_name:
+        type: VARCHAR
+        description: "UST_SPOT, SOFR_OIS, etc."
+      model_type:
+        type: VARCHAR
+        description: "NELSON_SIEGEL_SVENSSON, SMITH_WILSON, DIEBOLD_LI, VASICEK"
+      parameter_name:
+        type: VARCHAR
+        description: "beta0, beta1, beta2, beta3, lambda1, lambda2, tau, etc."
+      parameter_value:
+        type: DOUBLE
+        description: "Fitted parameter value"
+      goodness_of_fit:
+        type: DOUBLE
+        description: "RMSE, R-squared, or other fit metric"
+      source:
+        type: VARCHAR
+        description: "FITTED"
+      _loaded_at:
+        type: TIMESTAMP
+        description: "ETL timestamp"
+    partition_by: [curve_name, date]
+    examples:
+      - "NSS parameters for daily UST curve"
+      - "Smith-Wilson UFR parameters"
 
 # Reference tables (populated by scripts, not DBT)
 reference_tables:
-  - name: ref_countries
+  # series_id,indicator,frequency,unit,category,subcategory,active
+  - name: us_economic
+    description: >
+      Master list of economic indicators tracked in us_economic_indicators.
+      Use for metadata lookups, filtering, and ensuring consistent series usage.
     schema:
-      country_code: country_code
-      country_name: VARCHAR
-      central_bank: VARCHAR
-      central_bank_abbrev: VARCHAR
-      default_currency: currency_code
-      market_timezone: VARCHAR
-      is_active: BOOLEAN
+      series_id:
+        type: VARCHAR
+        description: "FRED series ID (primary key)"
+      indicator:
+        type: VARCHAR
+        description: "Human-readable name (e.g., 'GDP', 'Unemployment Rate')"
+      frequency:
+        type: VARCHAR
+        description: "Data frequency: MONTHLY, QUARTERLY, ANNUAL"
+      unit:
+        type: VARCHAR
+        description: "Measurement unit (e.g., 'Billions of Dollars', 'Percent')"
+      category:
+        type: VARCHAR
+        description: "Category: OUTPUT, LABOR_MARKET, INFLATION, HOUSING, TRADE, etc."
+      subcategory:
+        type: VARCHAR
+        description: "More specific grouping within category"
+      active:
+        type: BOOLEAN
+        description: "Currently tracked indicator"
     partition_by: []
 
-  - name: ref_sources
+  - name: treasury_securities
+    description: >
+      Master list of Treasury securities with static attributes.
+      Use for CUSIP lookups, security filtering, and maturity calculations.
     schema:
-      source_code: source_system
-      source_name: VARCHAR
-      source_type: VARCHAR
-      reliability_tier: INTEGER
-      api_endpoint: VARCHAR
-      contact_info: VARCHAR
-      is_active: BOOLEAN
+      cusip:
+        type: VARCHAR
+        description: "Treasury CUSIP identifier (primary key)"
+      security_type:
+        type: VARCHAR
+        description: "BILL, NOTE, BOND, TIPS, FRN"
+      issue_date:
+        type: DATE
+        description: "Original issue date"
+      maturity_date:
+        type: DATE
+        description: "Final maturity date"
+      coupon_rate:
+        type: DOUBLE
+        description: "Coupon rate in decimal (0 for bills)"
+      original_term:
+        type: VARCHAR
+        description: "Original tenor at issuance (e.g., '10-Year')"
+      is_active:
+        type: BOOLEAN
+        description: "Currently trading (not matured)"
+      callable:
+        type: BOOLEAN
+        description: "Has call provisions"
+      reopening_of:
+        type: VARCHAR
+        description: "Original CUSIP if this is a reopening"
+      source:
+        type: VARCHAR
+        description: "TreasuryDirect, Bloomberg"
+      _loaded_at:
+        type: TIMESTAMP
+        description: "ETL timestamp"
+    partition_by: []
+
+  - name: countries
+    description: "Country reference data for international rates (future use)"
+    schema:
+      country_code:
+        type: VARCHAR
+        description: "ISO 3166-1 alpha-2 code"
+      country_name:
+        type: VARCHAR
+        description: "Full country name"
+      central_bank:
+        type: VARCHAR
+        description: "Central bank name"
+      central_bank_abbrev:
+        type: VARCHAR
+        description: "Central bank abbreviation (e.g., 'Fed', 'ECB')"
+      default_currency:
+        type: VARCHAR
+        description: "ISO currency code"
+      market_timezone:
+        type: VARCHAR
+        description: "Primary market timezone"
+      is_active:
+        type: BOOLEAN
+        description: "Actively tracked"
+    partition_by: []
+
+  - name: sources
+    description: "Data source metadata and reliability tracking"
+    schema:
+      source_code:
+        type: VARCHAR
+        description: "Source identifier (e.g., 'FRED', 'BLOOMBERG', 'DTCC')"
+      source_name:
+        type: VARCHAR
+        description: "Full source name"
+      source_type:
+        type: VARCHAR
+        description: "GOVERNMENT, COMMERCIAL, EXCHANGE, SDR"
+      reliability_tier:
+        type: INTEGER
+        description: "1=Authoritative, 2=High quality, 3=Supplemental"
+      api_endpoint:
+        type: VARCHAR
+        description: "Base API URL"
+      contact_info:
+        type: VARCHAR
+        description: "Support contact"
+      is_active:
+        type: BOOLEAN
+        description: "Currently in use"
+    partition_by: []
+
+  - name: swap_conventions
+    description: >
+      Market conventions for swap pricing (day count, payment frequency, etc.).
+      Use for accurate swap valuation and cross-market comparison.
+    schema:
+      curve_type:
+        type: VARCHAR
+        description: "SOFR_OIS, LIBOR, FED_FUNDS_OIS"
+      currency:
+        type: VARCHAR
+        description: "USD, EUR, GBP, JPY"
+      day_count:
+        type: VARCHAR
+        description: "ACT/360, ACT/365, 30/360"
+      fixed_frequency:
+        type: VARCHAR
+        description: "Annual, Semi-Annual, Quarterly"
+      float_frequency:
+        type: VARCHAR
+        description: "Daily, Monthly, Quarterly"
+      settlement_lag:
+        type: INTEGER
+        description: "Business days to settlement (e.g., 2)"
+      is_active:
+        type: BOOLEAN
+        description: "Currently traded"
     partition_by: []

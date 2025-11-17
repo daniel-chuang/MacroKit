@@ -11,7 +11,6 @@ import os
 FLAGS = flags.FLAGS
 
 flags.DEFINE_boolean("overwrite", False, "Whether to overwrite existing data")
-flags.DEFINE_boolean("raw_only", False, "Only create raw staging tables")
 
 
 def load_config(
@@ -179,6 +178,16 @@ def create_raw_schema(conn: duckdb.DuckDBPyConnection) -> None:
     logging.info("Created raw schema")
 
 
+def create_ref_schema(conn: duckdb.DuckDBPyConnection) -> None:
+    """Create ref schema for reference data.
+
+    Args:
+        conn: DuckDB connection object
+    """
+    conn.execute("CREATE SCHEMA IF NOT EXISTS ref")
+    logging.info("Created ref schema")
+
+
 def create_tables_from_config(
     conn: duckdb.DuckDBPyConnection,
     tables_config: List[Dict[str, Any]],
@@ -201,7 +210,12 @@ def create_tables_from_config(
 
         # Build CREATE TABLE statement
         columns = []
-        for col_name, col_type in schema.items():
+        for col_name, col_def in schema.items():
+            # Handle both string and dict formats
+            if isinstance(col_def, dict):
+                col_type = col_def["type"]
+            else:
+                col_type = col_def
             columns.append(f"{col_name} {col_type}")
 
         full_table_name = f"{table_prefix}.{name}" if table_prefix else name
@@ -233,7 +247,7 @@ def load_reference_data_from_csv(
         if countries_csv.exists():
             conn.execute(
                 f"""
-                INSERT INTO ref_countries 
+                INSERT INTO ref.countries 
                 SELECT * FROM read_csv_auto('{countries_csv}')
             """
             )
@@ -246,7 +260,7 @@ def load_reference_data_from_csv(
         if sources_csv.exists():
             conn.execute(
                 f"""
-                INSERT INTO ref_sources 
+                INSERT INTO ref.sources 
                 SELECT * FROM read_csv_auto('{sources_csv}')
             """
             )
@@ -305,18 +319,12 @@ def main(args: List[str]) -> None:
         if "raw_tables" in config:
             create_tables_from_config(conn, config["raw_tables"], "raw")
 
-        if not FLAGS.raw_only:
-            # Create reference tables
-            if "reference_tables" in config:
-                create_tables_from_config(conn, config["reference_tables"])
-                # Load reference data
-                load_reference_data_from_csv(conn, config)
-
-            logging.info("\nDBT Setup Notes:")
-            logging.info("- Raw tables created in 'raw' schema")
-            logging.info("- Reference tables created in main schema")
-            logging.info("- Other tables should be created as DBT models")
-            logging.info("- Run 'dbt run' to create fact/dimension tables")
+        # Create reference tables
+        create_ref_schema(conn)
+        if "reference_tables" in config:
+            create_tables_from_config(conn, config["reference_tables"], "ref")
+            # Load reference data
+            load_reference_data_from_csv(conn, config)
 
         # Setup parquet storage
         setup_parquet_storage(config)
@@ -324,13 +332,9 @@ def main(args: List[str]) -> None:
         # Close connection
         conn.close()
 
-        logging.info("\n" + "=" * 60)
-        if FLAGS.raw_only:
-            logging.info("Raw staging area initialized!")
-            logging.info("Next: Run ingest script to load raw data")
-        else:
-            logging.info("Data lake initialized successfully!")
-            logging.info("Next: Run ingest script then use DBT to build models")
+        logging.info("=" * 60)
+        logging.info("Data lake initialized successfully!")
+        logging.info("Next: Run ingest script then use DBT to build models")
         logging.info("=" * 60)
 
     except Exception as e:

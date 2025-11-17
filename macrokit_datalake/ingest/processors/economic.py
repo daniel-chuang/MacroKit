@@ -7,21 +7,28 @@ from absl import logging
 class EconomicProcessor(BaseProcessor):
     """Process economic indicator data with vintages"""
 
-    def get_series_config(self):
-        """Economic series configuration"""
-        return {
-            "GDP": {"indicator": "GDP", "frequency": "QUARTERLY", "unit": "BILLIONS"},
-            "CPIAUCSL": {"indicator": "CPI", "frequency": "MONTHLY", "unit": "INDEX"},
-            "UNRATE": {
-                "indicator": "Unemployment Rate",
-                "frequency": "MONTHLY",
-                "unit": "PERCENT",
-            },
-        }
+    def get_config_file_name(self):
+        """Return CSV filename for economic series configuration"""
+        return "ref_us_economic.csv"
 
     def get_table_name(self):
         """Return table name"""
-        return "raw.economic_indicators"
+        return "raw.us_economic_indicators"
+
+    def _parse_config_df(self, df):
+        """Custom parsing for economic series configuration"""
+        config = {}
+
+        for _, row in df.iterrows():
+            config[row["series_id"]] = {
+                "indicator": row["indicator"],
+                "frequency": row["frequency"],
+                "unit": row["unit"],
+                "category": row["category"],
+                "subcategory": row["subcategory"],
+            }
+
+        return config
 
     def _extract_data(self, series_id, start_date, end_date, **kwargs):
         """Override to get vintage data"""
@@ -33,41 +40,75 @@ class EconomicProcessor(BaseProcessor):
             return None
 
         # Convert vintage data to DataFrame
-        df_all = raw_data.reset_index()
+        if isinstance(raw_data, pd.Series):
+            df_all = raw_data.to_frame(name="value").reset_index()
+        elif isinstance(raw_data, pd.DataFrame):
+            df_all = raw_data.reset_index()
+        else:
+            logging.error("Raw data is not a pandas Series or DataFrame.")
+            return None
 
         logging.info(f"Retrieved {len(df_all)} total observations across all vintages")
 
-        # Process vintages - minimal transformation, just type conversion
-        all_records = []
+        # Assign series_id and indicator info
+        df_all["series_id"] = kwargs["series_id"]
+        df_all["indicator"] = series_info["indicator"]
+        df_all["unit"] = series_info["unit"]
+        df_all["category"] = series_info["category"]
+        df_all["subcategory"] = series_info["subcategory"]
+        df_all["frequency"] = series_info["frequency"]
 
-        for _, row in df_all.iterrows():
-            if pd.isna(row["value"]):
-                continue
+        # Rename and convert date columns
+        df_all = df_all.rename(columns={"date": "observation_date"})
+        df_all["observation_date"] = pd.to_datetime(df_all["observation_date"]).dt.date
 
-            # Handle missing realtime_end column
-            realtime_end = row.get("realtime_end")
-            if realtime_end is None or pd.isna(realtime_end):
-                realtime_end = row["realtime_start"]
+        # Handle realtime_start column
+        if "realtime_start" in df_all.columns:
+            df_all["realtime_start"] = pd.to_datetime(df_all["realtime_start"]).dt.date
+        else:
+            df_all["realtime_start"] = df_all["observation_date"]
 
-            record = {
-                "series_id": kwargs["series_id"],
-                "observation_date": pd.to_datetime(row["date"]).date(),
-                "value": float(row["value"]),
-                "realtime_start": pd.to_datetime(row["realtime_start"]).date(),
-                "realtime_end": pd.to_datetime(realtime_end).date(),
-                "indicator": series_info["indicator"],
-                "unit": series_info["unit"],
-                "frequency": series_info["frequency"],
-            }
-            all_records.append(record)
+        # Handle realtime_end column
+        if "realtime_end" not in df_all.columns:
+            df_all["realtime_end"] = df_all["realtime_start"]
+        else:
+            df_all["realtime_end"] = pd.to_datetime(df_all["realtime_end"]).dt.date
+            mask = df_all["realtime_end"].isna()
+            df_all.loc[mask, "realtime_end"] = df_all.loc[mask, "realtime_start"]
 
-        if not all_records:
+        # Convert value column
+        df_all["value"] = pd.to_numeric(df_all["value"], errors="coerce")
+
+        # Drop NaN values
+        df_all = df_all.dropna(subset=["value"])
+
+        if df_all.empty:
             return None
 
-        df = pd.DataFrame(all_records)
-        df = self.add_common_columns(df, source="FRED", country="US")
+        # Select and order final columns
+        df = df_all[
+            [
+                "series_id",
+                "category",
+                "subcategory",
+                "observation_date",
+                "value",
+                "realtime_start",
+                "realtime_end",
+                "indicator",
+                "unit",
+                "frequency",
+            ]
+        ]
 
-        return df.sort_values(["observation_date", "realtime_start"])
+        df = self.add_common_columns(df, source="FRED")
+
+        # Sort and reset index before returning
+        df = df.sort_values(by=["observation_date", "realtime_start"]).reset_index(
+            drop=True
+        )
+
+        return df
 
     def _process_series(
         self, series_id, series_info, start_date, end_date, update_only, **kwargs
@@ -85,8 +126,10 @@ class EconomicProcessor(BaseProcessor):
             df = self._last_processed_df
             num_observations = len(df)
             num_unique_dates = df["observation_date"].nunique()
-            num_vintages = df.groupby("observation_date")["realtime_start"].count()
-            num_revised = (num_vintages > 1).sum()
+            num_vintages_per_date = df.groupby("observation_date")[
+                "realtime_start"
+            ].nunique()
+            num_revised = (num_vintages_per_date > 1).sum()
             avg_vintages = (
                 num_observations / num_unique_dates if num_unique_dates > 0 else 0
             )

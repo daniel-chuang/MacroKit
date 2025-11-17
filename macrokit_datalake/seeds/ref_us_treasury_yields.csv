@@ -1,0 +1,12 @@
+series_id,indicator,tenor,curve_type,active
+DGS1MO,1-Month Treasury CMT,1M,CMT,TRUE
+DGS3MO,3-Month Treasury CMT,3M,CMT,TRUE
+DGS6MO,6-Month Treasury CMT,6M,CMT,TRUE
+DGS1,1-Year Treasury CMT,1Y,CMT,TRUE
+DGS2,2-Year Treasury CMT,2Y,CMT,TRUE
+DGS3,3-Year Treasury CMT,3Y,CMT,TRUE
+DGS5,5-Year Treasury CMT,5Y,CMT,TRUE
+DGS7,7-Year Treasury CMT,7Y,CMT,TRUE
+DGS10,10-Year Treasury CMT,10Y,CMT,TRUE
+DGS20,20-Year Treasury CMT,20Y,CMT,TRUE
+DGS30,30-Year Treasury CMT,30Y,CMT,TRUE
