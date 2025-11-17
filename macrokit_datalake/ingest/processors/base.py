@@ -109,12 +109,14 @@ class BaseProcessor(ABC):
         if raw_data is None or len(raw_data) == 0:
             logging.warning(f"No data extracted for {series_id}")
             return
+        logging.info("✓ Extracted data for {series_id}")
 
         # Transform data
         df = self.transform_data(raw_data, series_info, series_id=series_id)
         if df is None or len(df) == 0:
             logging.warning(f"No data after transformation for {series_id}")
             return
+        logging.info(f"✓ Transformed data for {series_id}")
 
         # Filter for updates if needed
         if update_only and not kwargs.get("force_full", False):
@@ -122,6 +124,7 @@ class BaseProcessor(ABC):
             if len(df) == 0:
                 logging.info(f"No new data for {series_id}")
                 return
+        logging.info(f"✓ Filtered data for updates for {series_id}")
 
         # Insert data
         self._insert_data(df)
@@ -134,7 +137,8 @@ class BaseProcessor(ABC):
     def _filter_for_updates(self, df, series_info):
         """Filter data for incremental updates - can be overridden"""
         # Default implementation - override in subclasses for specific logic
-        return df
+        # Ensure we have a clean index before returning
+        return df.reset_index(drop=True)
 
     def _insert_data(self, df):
         """Insert data into database"""
@@ -143,14 +147,23 @@ class BaseProcessor(ABC):
         # Ensure DataFrame has a clean integer index starting from 0
         df = df.reset_index(drop=True)
 
-        # Get column names from DataFrame
-        columns = ", ".join(df.columns)
-        query = f"""
-            INSERT INTO {table_name} ({columns})
-            SELECT * FROM df
-        """
+        # Use DuckDB's INSERT FROM VALUES with explicit column mapping
+        columns = list(df.columns)
+        column_str = ", ".join(columns)
 
-        self.conn.execute(query)
+        # Convert DataFrame to list of tuples for insertion
+        values = [tuple(row) for row in df.itertuples(index=False, name=None)]
+
+        # Create placeholders for parameterized query
+        placeholder = "(" + ", ".join(["?" for _ in columns]) + ")"
+        values_str = ", ".join([placeholder for _ in range(len(values))])
+
+        query = f"INSERT INTO {table_name} ({column_str}) VALUES {values_str}"
+
+        # Flatten the values list for the parameterized query
+        flat_values = [item for sublist in values for item in sublist]
+
+        self.conn.execute(query, flat_values)
 
     def add_common_columns(self, df, **kwargs):
         """Add common columns that most processors need"""

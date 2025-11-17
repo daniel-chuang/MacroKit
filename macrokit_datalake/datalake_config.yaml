@@ -70,7 +70,7 @@ raw_tables:
         description: "Yield in decimal (0.0423 = 4.23%)"
       indicator:
         type: VARCHAR
-        description: "Human-readable name (e.g., 'Federal Funds Rate', 'VIX')"
+        description: "Human-readable name"
       curve_type:
         type: VARCHAR
         description: "CMT (constant maturity), PAR (par curve), SPOT (zero curve), FORWARD (forward curve)"
@@ -336,6 +336,135 @@ raw_tables:
         type: TIMESTAMP
         description: "ETL timestamp"
     partition_by: [auction_date]
+
+  - name: us_treasury_futures
+    description: >
+      Treasury futures contracts (ZT, ZF, ZN, TN, ZB, UB).
+      Essential for basis trading, hedging, and liquidity analysis.
+    schema:
+      contract_code:
+        type: VARCHAR
+        description: "Root symbol (ZN, ZB, etc.)"
+      contract_month:
+        type: VARCHAR
+        description: "Delivery month (H25, M25, U25, Z25)"
+      date:
+        type: DATE
+      price:
+        type: DOUBLE
+        description: "Settlement or last trade price"
+      open:
+        type: DOUBLE
+      high:
+        type: DOUBLE
+      low:
+        type: DOUBLE
+      volume:
+        type: BIGINT
+      open_interest:
+        type: BIGINT
+      settlement:
+        type: DOUBLE
+      prior_settlement:
+        type: DOUBLE
+      contract_type:
+        type: VARCHAR
+        description: "2Y, 5Y, 10Y, 30Y, ULTRA"
+    partition_by: [contract_type]
+
+  - name: calculated_spreads
+    description: >
+      Pre-computed spread relationships for RV trading.
+      Butterfly, curve, swap spreads, basis.
+    schema:
+      date:
+        type: DATE
+      spread_type:
+        type: VARCHAR
+        description: "BUTTERFLY, CURVE, SWAP_SPREAD, FUT_CASH_BASIS, TED"
+      tenor_1:
+        type: VARCHAR
+      tenor_2:
+        type: VARCHAR
+      tenor_3:
+        type: VARCHAR
+        description: "For butterflies (nullable for 2-leg spreads)"
+      spread_value:
+        type: DOUBLE
+        description: "In basis points or native units"
+      z_score_20d:
+        type: DOUBLE
+      z_score_60d:
+        type: DOUBLE
+      percentile_1y:
+        type: DOUBLE
+    partition_by: [spread_type]
+
+  - name: cftc_positioning
+    description: >
+      CFTC Commitment of Traders data for Treasury futures.
+      Use for sentiment analysis and contrarian signals.
+    schema:
+      report_date:
+        type: DATE
+      contract:
+        type: VARCHAR
+        description: "2Y, 5Y, 10Y, 30Y, ULTRA"
+      category:
+        type: VARCHAR
+        description: "DEALER, ASSET_MANAGER, LEVERAGED, OTHER"
+      long_positions:
+        type: BIGINT
+      short_positions:
+        type: BIGINT
+      net_positions:
+        type: BIGINT
+      change_long:
+        type: BIGINT
+      change_short:
+        type: BIGINT
+    partition_by: [contract]
+
+  - name: realized_volatility
+    description: >
+      Historical volatility calculations across instruments.
+      Use for vol regime classification and options trading.
+    schema:
+      date:
+        type: DATE
+      instrument:
+        type: VARCHAR
+        description: "10Y UST, ZN, 2s10s, etc."
+      window:
+        type: INTEGER
+        description: "Lookback period (20, 60, 252)"
+      realized_vol:
+        type: DOUBLE
+        description: "Annualized realized volatility"
+      realized_vol_bp:
+        type: DOUBLE
+        description: "For rates: volatility in basis points"
+    partition_by: [instrument]
+
+  - name: fomc_events
+    description: "Fed meeting dates and outcomes"
+    schema:
+      meeting_date:
+        type: DATE
+      decision_type:
+        type: VARCHAR
+        description: "RATE_CHANGE, NO_CHANGE, QE, QT"
+      target_rate:
+        type: DOUBLE
+      rate_change:
+        type: DOUBLE
+      dot_plot_median:
+        type: DOUBLE
+        description: "Median rate projection"
+      statement_hawkish_score:
+        type: DOUBLE
+        description: "Text sentiment (if computed)"
+    partition_by: []
 
   - name: fitted_curve_parameters
     description: >

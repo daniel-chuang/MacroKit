@@ -3,28 +3,44 @@ version: 2
 models:
   - name: stg_us_market_data
     description: "Cleaned treasury yield data"
-
     columns:
       - name: date
         description: "Observation date"
         tests:
           - not_null
-
       - name: country
         description: "Country code"
         tests:
           - not_null
           - accepted_values:
               values: ["US"]
-
       - name: maturity
         description: "Maturity label"
         tests:
           - not_null
           - accepted_values:
               values: ["1M", "3M", "6M", "1Y", "2Y", "5Y", "10Y", "30Y"]
-
       - name: yield
         description: "Yield value in percent"
         tests:
           - not_null
+
+  - name: stg_us_economic_indicators
+    description: "Cleaned economic indicators data"
+    columns:
+      - name: series_id
+        description: "Unique identifier for the economic series"
+        tests:
+          - not_null
+      - name: observation_date
+        description: "Date the event occurred"
+        tests:
+          - not_null
+      - name: value
+        description: "Observed value of the economic indicator"
+      - name: country
+        description: "Country code"
+        tests:
+          - not_null
+          - accepted_values:
+              values: ["US"]

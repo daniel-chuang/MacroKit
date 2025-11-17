@@ -112,14 +112,16 @@ init: check-conda-env check-config ## Initialize the data lake (OVERWRITE=1 for 
 # DATA INGESTION
 # ============================================================================
 
-ingest: check-env ## Ingest data (FULL=1 for historical, OVERWRITE=1 to overwrite, TABLES=name for specific table)
-	@printf "$(YELLOW)Ingesting data...$(RESET)\n"
-	@CMD="$(CONDA) run -n $(CONDA_ENV) python $(INGEST_DIR)/raw.py"; \
-	if [ "$(FULL)" != "1" ]; then CMD="$$CMD --update_only"; fi; \
-	if [ "$(OVERWRITE)" = "1" ]; then CMD="$$CMD --overwrite"; fi; \
-	if [ -n "$(TABLES)" ]; then CMD="$$CMD --tables=$(TABLES)"; fi; \
-	$$CMD
-	@printf "$(GREEN)✓ Data ingestion complete$(RESET)\n"
+ingest: check-env ## Ingest data (FULL=1 for historical, OVERWRITE=1 to overwrite, TABLES=name for specific table, START_DATE=YYYY-MM-DD, END_DATE=YYYY-MM-DD)
+		@printf "$(YELLOW)Ingesting data...$(RESET)\n"
+		@CMD="$(CONDA) run -n $(CONDA_ENV) python $(INGEST_DIR)/raw.py"; \
+		if [ "$(FULL)" != "1" ]; then CMD="$$CMD --update_only"; fi; \
+		if [ "$(OVERWRITE)" = "1" ]; then CMD="$$CMD --overwrite"; fi; \
+		if [ -n "$(TABLES)" ]; then CMD="$$CMD --tables=$(TABLES)"; fi; \
+		if [ -n "$(START_DATE)" ]; then CMD="$$CMD --start_date=$(START_DATE)"; fi; \
+		if [ -n "$(END_DATE)" ]; then CMD="$$CMD --end_date=$(END_DATE)"; fi; \
+		$$CMD
+		@printf "$(GREEN)✓ Data ingestion complete$(RESET)\n"
 
 # ============================================================================
 # DBT OPERATIONS

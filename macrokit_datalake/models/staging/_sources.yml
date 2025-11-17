@@ -1,0 +1,47 @@
+version: 2
+
+sources:
+  - name: raw
+    description: Raw data from various sources
+    tables:
+      - name: us_market_data
+        description: Raw US market data including treasury yields
+        columns:
+          - name: date
+            description: "Observation date"
+          - name: series_id
+            description: "Series identifier"
+          - name: value
+            description: "Market data value"
+          - name: asset_class
+            description: "Type of asset (e.g., TREASURY)"
+          - name: maturity
+            description: "Maturity period"
+          - name: indicator
+            description: "Market indicator name"
+          - name: _loaded_at
+            description: "Timestamp when data was loaded"
+
+      - name: us_economic_indicators
+        description: Raw US economic indicators data
+        columns:
+          - name: series_id
+            description: "Unique identifier for the economic series"
+          - name: observation_date
+            description: "Date the event occurred"
+          - name: value
+            description: "Observed value"
+          - name: realtime_start
+            description: "When the vintage became available"
+          - name: realtime_end
+            description: "When the vintage was replaced"
+          - name: indicator
+            description: "Economic indicator name"
+          - name: unit
+            description: "Unit of measurement"
+          - name: frequency
+            description: "Data frequency"
+          - name: source
+            description: "Data source"
+          - name: _loaded_at
+            description: "Timestamp when data was loaded"

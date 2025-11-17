@@ -42,24 +42,27 @@ class TreasuryYieldProcessor(BaseProcessor):
         df["curve_type"] = series_info["curve_type"]
         df["indicator"] = series_info["indicator"]
 
-        # Add common columns
-        df = self.add_common_columns(df, source="FRED")
-
-        # Type conversions
+        # Type conversions first
         df["date"] = pd.to_datetime(df["date"]).dt.date
         df["yield"] = pd.to_numeric(df["yield"], errors="coerce")
 
-        # Convert from percentage to decimal ($4.23 \to 0.0423$)
+        # Drop NaN yields and reset index immediately
+        # df = df.dropna(subset=["yield"]).reset_index(drop=True)
+
+        if len(df) == 0:
+            return None
+
+        # Convert from percentage to decimal (4.23% to 0.0423)
         df["yield"] = df["yield"] / 100.0
 
         # Add bid/ask placeholders
         df["bid"] = None
         df["ask"] = None
 
-        # Drop NaN yields
-        df = df.dropna(subset=["yield"])
+        # Add common columns
+        df = self.add_common_columns(df, source="FRED")
 
-        # Sort and reset index before returning
+        # Final sort and return with fresh index
         df = df.sort_values(["date", "tenor"]).reset_index(drop=True)
 
         return df
@@ -69,6 +72,7 @@ class TreasuryYieldProcessor(BaseProcessor):
         if len(df) == 0:
             return df
 
+        # Use .iloc[0] for safe index access after potential filtering operations
         tenor = df["tenor"].iloc[0]
         curve_type = df["curve_type"].iloc[0]
 
@@ -114,35 +118,3 @@ class TreasuryYieldProcessor(BaseProcessor):
         """Override to store df for statistics and insert"""
         self._last_processed_df = df
         super()._insert_data(df)
-
-    def get_curve_for_date(self, date, curve_type="CMT"):
-        """
-        Helper method to retrieve full curve for a specific date.
-
-        Args:
-            date: Date to retrieve curve for
-            curve_type: 'CMT', 'PAR', 'SPOT', or 'FORWARD'
-
-        Returns:
-            DataFrame with columns [tenor, yield]
-        """
-        query = f"""
-        SELECT tenor, yield
-        FROM {self.get_table_name()}
-        WHERE date = ? AND curve_type = ?
-        ORDER BY 
-            CASE tenor
-                WHEN '1M' THEN 1
-                WHEN '3M' THEN 2
-                WHEN '6M' THEN 3
-                WHEN '1Y' THEN 4
-                WHEN '2Y' THEN 5
-                WHEN '3Y' THEN 6
-                WHEN '5Y' THEN 7
-                WHEN '7Y' THEN 8
-                WHEN '10Y' THEN 9
-                WHEN '20Y' THEN 10
-                WHEN '30Y' THEN 11
-            END
-        """
-        return self.conn.execute(query, [date, curve_type]).df()

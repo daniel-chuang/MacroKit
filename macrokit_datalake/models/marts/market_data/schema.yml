@@ -2,4 +2,4 @@ version: 2
 
 models:
   - name: fct_us_market_data
-    description: "Treasury yields fact table"
+    description: "Market data fact table"
