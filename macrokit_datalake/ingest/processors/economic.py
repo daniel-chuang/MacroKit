@@ -32,7 +32,9 @@ class EconomicProcessor(BaseProcessor):
 
     def _extract_data(self, series_id, start_date, end_date, **kwargs):
         """Override to get vintage data"""
-        return self.extractor.get_vintage_data(series_id)
+        return self.extractor.get_vintage_data(
+            series_id, start_date, end_date, **kwargs
+        )
 
     def transform_data(self, raw_data, series_info, **kwargs):
         """Transform economic data with vintages"""

@@ -12,6 +12,7 @@ DuckDB + Parquet + dbt-core + dbt-duckdb
 
 1. Create a new conda environment
 2. Pip install from requirements.txt
+3. Run `pip install -e ".[dev]"` from the root
 
 ## Development Setup
 

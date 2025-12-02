@@ -1,6 +1,7 @@
 from fredapi import Fred
 from extractors.base import BaseExtractor
 from absl import logging
+import pandas as pd
 
 
 class FREDExtractor(BaseExtractor):
@@ -18,6 +19,19 @@ class FREDExtractor(BaseExtractor):
             series_id, observation_start=start_date, observation_end=end_date
         )
 
-    def get_vintage_data(self, series_id, **kwargs):
+    def get_vintage_data(self, series_id, start_date=None, end_date=None, **kwargs):
         """Get all vintage data for a series"""
-        return self.client.get_series_all_releases(series_id)
+        if not end_date:
+            series = self.client.get_series_all_releases(series_id)
+            series.index = pd.to_datetime(series.index)
+        else:
+            series = self.client.get_series_as_of_date(series_id, as_of_date=end_date)
+            series.index = pd.to_datetime(series.index)
+            end_date = pd.to_datetime(end_date)
+            series = series[series.index <= end_date]
+
+        if start_date:
+            start_date = pd.to_datetime(start_date)
+            series = series[series.index >= start_date]
+
+        return series

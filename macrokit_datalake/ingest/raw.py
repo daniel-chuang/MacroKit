@@ -10,6 +10,9 @@ from processors.market import MarketProcessor
 from processors.economic import EconomicProcessor
 from processors.treasury import TreasuryYieldProcessor
 
+# Utils
+from macrokit_datalake import config_utils
+
 FLAGS = flags.FLAGS
 
 flags.DEFINE_boolean("overwrite", False, "Whether to overwrite existing data")
@@ -27,12 +30,6 @@ flags.DEFINE_string(
 )
 
 load_dotenv()
-
-
-def load_config():
-    """Load configuration from YAML file"""
-    with open("macrokit_datalake/datalake_config.yaml", "r") as f:
-        return yaml.safe_load(f)
 
 
 def get_date_range():
@@ -65,7 +62,7 @@ def main(argv):
     logging.info("=" * 60)
 
     # Load configuration
-    config = load_config()
+    config = config_utils.load_config()
 
     # Connect to database
     db_path = config["database"]["path"]

@@ -7,34 +7,11 @@ from absl import flags
 import shutil
 from typing import Dict, List, Any, Optional
 import os
+from macrokit_datalake import config_utils
 
 FLAGS = flags.FLAGS
 
 flags.DEFINE_boolean("overwrite", False, "Whether to overwrite existing data")
-
-
-def load_config(
-    config_path: str = "macrokit_datalake/datalake_config.yaml",
-) -> Dict[str, Any]:
-    """Load configuration from YAML file.
-
-    Args:
-        config_path: Path to the configuration YAML file
-
-    Returns:
-        Configuration dictionary
-
-    Raises:
-        FileNotFoundError: If config file doesn't exist
-        yaml.YAMLError: If config file is malformed
-    """
-    try:
-        with open(config_path, "r") as f:
-            return yaml.safe_load(f)
-    except FileNotFoundError:
-        raise FileNotFoundError(f"Configuration file not found: {config_path}")
-    except yaml.YAMLError as e:
-        raise yaml.YAMLError(f"Error parsing configuration file: {e}")
 
 
 def get_enum_values_from_dbt(
@@ -198,7 +175,7 @@ def create_tables_from_config(
     Args:
         conn: DuckDB connection object
         tables_config: List of table configurations
-        table_prefix: Optional prefix for table names (e.g., "raw.")
+        table_prefix: Optional prefix for table names (e.g., "raw")
     """
     for table in tables_config:
         try:
@@ -230,6 +207,201 @@ def create_tables_from_config(
             logging.error(f"Error creating table {full_table_name}: {e}")
 
 
+def create_metadata_table(
+    conn: duckdb.DuckDBPyConnection, config: Dict[str, Any]
+) -> None:
+    """Create table metadata table and populate with descriptions from config.
+
+    Args:
+        conn: DuckDB connection object
+        config: Configuration dictionary containing table definitions
+    """
+    # Create the metadata table with temporal characteristics
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS table_metadata (
+            table_name VARCHAR PRIMARY KEY,
+            schema_name VARCHAR,
+            description TEXT,
+            table_type VARCHAR,
+            -- Temporal characteristics
+            temporal_grain VARCHAR,  -- DAILY, WEEKLY, MONTHLY, QUARTERLY, EVENT_BASED, STATIC, SLOWLY_CHANGING, MIXED
+            primary_date_column VARCHAR,  -- Which column to use for time joins
+            has_revisions BOOLEAN DEFAULT FALSE,  -- Does data get revised?
+            revision_start_column VARCHAR,  -- e.g., 'realtime_start'
+            revision_end_column VARCHAR,    -- e.g., 'realtime_end'
+            -- Partitioning
+            partition_columns VARCHAR[],  -- Array of partition column names
+            -- Metadata
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """
+    )
+    logging.info("Created table_metadata table")
+
+    # Insert raw table descriptions with temporal metadata
+    if "raw_tables" in config:
+        for table in config["raw_tables"]:
+            name = table["name"]
+            description = table.get("description", "").strip()
+
+            # Extract temporal metadata from config
+            temporal_grain = table.get("temporal_grain", "DAILY")
+            primary_date_col = table.get("primary_date_column", "date")
+            has_revisions = table.get("has_revisions", False)
+            revision_start_col = table.get("revision_start_column")
+            revision_end_col = table.get("revision_end_column")
+            partition_cols = table.get("partition_by", [])
+
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO table_metadata 
+                (table_name, schema_name, description, table_type, 
+                 temporal_grain, primary_date_column, has_revisions, 
+                 revision_start_column, revision_end_column, partition_columns)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+                (
+                    name,
+                    "raw",
+                    description,
+                    "raw",
+                    temporal_grain,
+                    primary_date_col,
+                    has_revisions,
+                    revision_start_col,
+                    revision_end_col,
+                    partition_cols,
+                ),
+            )
+            logging.info(f"Added metadata for raw.{name} (grain={temporal_grain})")
+
+    # Insert reference table descriptions
+    if "reference_tables" in config:
+        for table in config["reference_tables"]:
+            name = table["name"]
+            description = table.get("description", "").strip()
+            temporal_grain = table.get("temporal_grain", "STATIC")
+
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO table_metadata 
+                (table_name, schema_name, description, table_type, temporal_grain)
+                VALUES (?, ?, ?, ?, ?)
+            """,
+                (name, "ref", description, "reference", temporal_grain),
+            )
+            logging.info(f"Added metadata for ref.{name} (grain={temporal_grain})")
+
+
+def create_column_metadata_table(
+    conn: duckdb.DuckDBPyConnection, config: Dict[str, Any]
+) -> None:
+    """Create column metadata table for detailed column documentation.
+
+    Args:
+        conn: DuckDB connection object
+        config: Configuration dictionary
+    """
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS column_metadata (
+            table_name VARCHAR,
+            schema_name VARCHAR,
+            column_name VARCHAR,
+            data_type VARCHAR,
+            description TEXT,
+            is_primary_date BOOLEAN DEFAULT FALSE,
+            is_revision_timestamp BOOLEAN DEFAULT FALSE,
+            is_system_metadata BOOLEAN DEFAULT FALSE,
+            is_partition_key BOOLEAN DEFAULT FALSE,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (schema_name, table_name, column_name)
+        )
+    """
+    )
+    logging.info("Created column_metadata table")
+
+    # Populate from config - raw tables
+    if "raw_tables" in config:
+        for table in config["raw_tables"]:
+            table_name = table["name"]
+            schema_name = "raw"
+            schema = table.get("schema", {})
+            primary_date_col = table.get("primary_date_column", "date")
+            revision_start_col = table.get("revision_start_column")
+            revision_end_col = table.get("revision_end_column")
+            partition_cols = table.get("partition_by", [])
+
+            for col_name, col_def in schema.items():
+                if isinstance(col_def, dict):
+                    col_type = col_def["type"]
+                    col_desc = col_def.get("description", "")
+                else:
+                    col_type = col_def
+                    col_desc = ""
+
+                is_primary_date = col_name == primary_date_col
+                is_revision = col_name in [revision_start_col, revision_end_col]
+                is_system = col_name.startswith("_")
+                is_partition = col_name in partition_cols
+
+                conn.execute(
+                    """
+                    INSERT OR REPLACE INTO column_metadata
+                    (table_name, schema_name, column_name, data_type, description, 
+                     is_primary_date, is_revision_timestamp, is_system_metadata, is_partition_key)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        table_name,
+                        schema_name,
+                        col_name,
+                        col_type,
+                        col_desc,
+                        is_primary_date,
+                        is_revision,
+                        is_system,
+                        is_partition,
+                    ),
+                )
+
+            logging.info(
+                f"Added column metadata for raw.{table_name} ({len(schema)} columns)"
+            )
+
+    # Populate from config - reference tables
+    if "reference_tables" in config:
+        for table in config["reference_tables"]:
+            table_name = table["name"]
+            schema_name = "ref"
+            schema = table.get("schema", {})
+
+            for col_name, col_def in schema.items():
+                if isinstance(col_def, dict):
+                    col_type = col_def["type"]
+                    col_desc = col_def.get("description", "")
+                else:
+                    col_type = col_def
+                    col_desc = ""
+
+                is_system = col_name.startswith("_")
+
+                conn.execute(
+                    """
+                    INSERT OR REPLACE INTO column_metadata
+                    (table_name, schema_name, column_name, data_type, description, is_system_metadata)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (table_name, schema_name, col_name, col_type, col_desc, is_system),
+                )
+
+            logging.info(
+                f"Added column metadata for ref.{table_name} ({len(schema)} columns)"
+            )
+
+
 def load_reference_data_from_csv(
     conn: duckdb.DuckDBPyConnection, config: Dict[str, Any]
 ) -> None:
@@ -242,32 +414,110 @@ def load_reference_data_from_csv(
     try:
         seeds_path = Path(config.get("seeds_path", "macrokit_datalake/seeds"))
 
-        # Load countries from CSV
-        countries_csv = seeds_path / "ref_countries.csv"
-        if countries_csv.exists():
-            conn.execute(
-                f"""
-                INSERT INTO ref.countries 
-                SELECT * FROM read_csv_auto('{countries_csv}')
-            """
-            )
-            logging.info(f"Loaded reference countries from {countries_csv}")
-        else:
-            logging.warning(f"Countries CSV not found: {countries_csv}")
+        # Define CSV files to load
+        csv_files = {
+            "countries": "ref_countries.csv",
+            "sources": "ref_sources.csv",
+            "us_economic": "ref_us_economic.csv",
+            "swap_conventions": "ref_swap_conventions.csv",
+        }
 
-        # Load other reference data similarly
-        sources_csv = seeds_path / "ref_sources.csv"
-        if sources_csv.exists():
-            conn.execute(
-                f"""
-                INSERT INTO ref.sources 
-                SELECT * FROM read_csv_auto('{sources_csv}')
-            """
-            )
-            logging.info(f"Loaded reference sources from {sources_csv}")
+        for table_name, csv_filename in csv_files.items():
+            csv_path = seeds_path / csv_filename
+            if csv_path.exists():
+                try:
+                    conn.execute(
+                        f"""
+                        INSERT INTO ref.{table_name} 
+                        SELECT * FROM read_csv_auto('{csv_path}')
+                    """
+                    )
+                    logging.info(f"Loaded reference data from {csv_path}")
+                except Exception as e:
+                    logging.warning(
+                        f"Could not load {csv_filename} into ref.{table_name}: {e}"
+                    )
+            else:
+                logging.warning(f"CSV file not found: {csv_path}")
 
     except Exception as e:
         logging.error(f"Error loading reference data: {e}")
+
+
+def generate_date_dimension(
+    conn: duckdb.DuckDBPyConnection,
+    start_date: str = "2000-01-01",
+    end_date: str = "2030-12-31",
+) -> None:
+    """Generate date dimension table.
+
+    Args:
+        conn: DuckDB connection object
+        start_date: Start date (ISO format)
+        end_date: End date (ISO format)
+    """
+    logging.info(f"Generating date dimension from {start_date} to {end_date}")
+
+    conn.execute(
+        f"""
+        INSERT INTO ref.date_dimension (
+            date, year, quarter, month, day, day_of_week, day_name,
+            is_business_day, is_month_end, is_quarter_end, is_year_end
+        )
+        WITH date_series AS (
+            SELECT 
+                date::DATE as date
+            FROM generate_series(
+                DATE '{start_date}',
+                DATE '{end_date}',
+                INTERVAL '1 day'
+            ) AS t(date)
+        )
+        SELECT 
+            date,
+            EXTRACT(YEAR FROM date)::INTEGER as year,
+            EXTRACT(QUARTER FROM date)::INTEGER as quarter,
+            EXTRACT(MONTH FROM date)::INTEGER as month,
+            EXTRACT(DAY FROM date)::INTEGER as day,
+            EXTRACT(ISODOW FROM date)::INTEGER as day_of_week,
+            CASE EXTRACT(ISODOW FROM date)
+                WHEN 1 THEN 'Monday'
+                WHEN 2 THEN 'Tuesday'
+                WHEN 3 THEN 'Wednesday'
+                WHEN 4 THEN 'Thursday'
+                WHEN 5 THEN 'Friday'
+                WHEN 6 THEN 'Saturday'
+                WHEN 7 THEN 'Sunday'
+            END as day_name,
+            -- Simple business day logic (Mon-Fri, no holidays yet)
+            EXTRACT(ISODOW FROM date) BETWEEN 1 AND 5 as is_business_day,
+            date = LAST_DAY(date) as is_month_end,
+            date = LAST_DAY(date) AND EXTRACT(MONTH FROM date) IN (3,6,9,12) as is_quarter_end,
+            EXTRACT(MONTH FROM date) = 12 AND EXTRACT(DAY FROM date) = 31 as is_year_end
+        FROM date_series
+    """
+    )
+
+    # Update prior/next business day columns
+    conn.execute(
+        """
+        UPDATE ref.date_dimension
+        SET prior_business_day = (
+            SELECT MAX(d2.date)
+            FROM ref.date_dimension d2
+            WHERE d2.is_business_day = TRUE
+              AND d2.date < date_dimension.date
+        ),
+        next_business_day = (
+            SELECT MIN(d2.date)
+            FROM ref.date_dimension d2
+            WHERE d2.is_business_day = TRUE
+              AND d2.date > date_dimension.date
+        )
+    """
+    )
+
+    logging.info("Date dimension generated successfully")
 
 
 def setup_parquet_storage(config: Dict[str, Any]) -> None:
@@ -301,7 +551,7 @@ def main(args: List[str]) -> None:
 
     try:
         # Load configuration
-        config = load_config()
+        config = config_utils.load_config()
 
         # Create necessary folders
         create_folder_if_not_exists(config["storage"]["local_path"])
@@ -323,8 +573,16 @@ def main(args: List[str]) -> None:
         create_ref_schema(conn)
         if "reference_tables" in config:
             create_tables_from_config(conn, config["reference_tables"], "ref")
-            # Load reference data
-            load_reference_data_from_csv(conn, config)
+
+        # Create metadata tables (table-level and column-level)
+        create_metadata_table(conn, config)
+        create_column_metadata_table(conn, config)
+
+        # Load reference data from CSV
+        load_reference_data_from_csv(conn, config)
+
+        # Generate date dimension
+        generate_date_dimension(conn)
 
         # Setup parquet storage
         setup_parquet_storage(config)
@@ -334,7 +592,13 @@ def main(args: List[str]) -> None:
 
         logging.info("=" * 60)
         logging.info("Data lake initialized successfully!")
-        logging.info("Next: Run ingest script then use DBT to build models")
+        logging.info("")
+        logging.info("Metadata available in:")
+        logging.info("  - table_metadata (temporal grain, partitioning)")
+        logging.info("  - column_metadata (column descriptions, flags)")
+        logging.info("  - ref.date_dimension (calendar table)")
+        logging.info("")
+        logging.info("Next: Run ingest scripts then use DBT to build models")
         logging.info("=" * 60)
 
     except Exception as e:

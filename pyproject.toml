@@ -28,6 +28,7 @@ dependencies = [
     "streamlit",
     "click==8.0.0",
     "watchdog",
+    "streamlit-plotly-events"
 ]
 
 [project.optional-dependencies]

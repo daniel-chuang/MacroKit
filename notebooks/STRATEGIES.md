@@ -304,6 +304,8 @@
 
 - [x] `us_treasury_yields` - Used by 95%+ of strategies
   - [ ] Forward + spot curves
+- [ ] `us_cusip` - CUSIP level data
+- [ ] `us_forwards` -
 - [ ] `us_treasury_futures` - Essential for futures strategies (25% of catalog)
 - [ ] `calculated_spreads` - Pre-computed spreads with z-scores (critical for RV)
 - [x] `us_economic_indicators` - Macro positioning (60% of strategies)

@@ -1,5 +1,6 @@
 series_id,indicator,asset_class,maturity,active
 DFF,Federal Funds Rate,RATE,O/N,TRUE
+EFFR,Effective Federal Funds Rate,RATE,O/N,TRUE
 SOFR,SOFR,RATE,O/N,TRUE
 T10Y2Y,10Y-2Y Treasury Spread,SPREAD,10Y-2Y,TRUE
 T10Y3M,10Y-3M Treasury Spread,SPREAD,10Y-3M,TRUE

@@ -227,3 +227,8 @@ reset: ## Reset everything (dangerous!)
 	else \
 		printf "$(YELLOW)Reset cancelled$(RESET)\n"; \
 	fi
+
+dashboard: ## Start Streamlit dashboard
+	@printf "$(YELLOW)Starting Streamlit dashboard...$(RESET)\n"
+	streamlit run dashboards/app.py
+	@printf "$(GREEN)✓ Streamlit dashboard stopped$(RESET)\n"

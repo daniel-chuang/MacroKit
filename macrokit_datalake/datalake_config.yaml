@@ -9,13 +9,22 @@ storage:
   partitioning:
     scheme: hive
 
-# Raw staging tables (for data ingestion scripts)
+# ============================================
+# RAW STAGING TABLES
+# ============================================
 raw_tables:
+  # ============================================
+  # ECONOMIC DATA AND MARKET FACTORS
+  # ============================================
   - name: us_market_data
     description: >
       Scalar market factors and regime indicators. Single value per date per indicator.
       Use for macro analysis, factor models, and correlation studies.
       NOT for term structure data (use us_treasury_yields, us_swap_rates instead).
+    temporal_grain: DAILY
+    primary_date_column: date
+    has_revisions: false
+    partition_by: [asset_class]
     schema:
       series_id:
         type: VARCHAR
@@ -41,7 +50,6 @@ raw_tables:
       _loaded_at:
         type: TIMESTAMP
         description: "ETL timestamp"
-    partition_by: [asset_class]
     examples:
       - "Fed Funds Rate (single value per day)"
       - "SOFR O/N fixing"
@@ -50,155 +58,17 @@ raw_tables:
       - "WTI Crude Oil price"
       - "10Y-2Y spread (scalar spread, not curve)"
 
-  - name: us_treasury_yields
-    description: >
-      Constant Maturity Treasury (CMT) yields and derived curves. Multiple tenors per date.
-      CMTs are interpolated/fitted yields representing what a Treasury would yield at exact maturities.
-      Use for curve analysis, term structure modeling, PCA, and yield curve strategies.
-    schema:
-      series_id:
-        type: VARCHAR
-        description: "FRED series ID (e.g., 'DGS1MO', 'DGS10')"
-      date:
-        type: DATE
-        description: "Curve date"
-      tenor:
-        type: VARCHAR
-        description: "Time to maturity (e.g., '1M', '3M', '6M', '1Y', '2Y', '3Y', '5Y', '7Y', '10Y', '20Y', '30Y')"
-      yield:
-        type: DOUBLE
-        description: "Yield in decimal (0.0423 = 4.23%)"
-      indicator:
-        type: VARCHAR
-        description: "Human-readable name"
-      curve_type:
-        type: VARCHAR
-        description: "CMT (constant maturity), PAR (par curve), SPOT (zero curve), FORWARD (forward curve)"
-      bid:
-        type: DOUBLE
-        description: "Bid yield (if available)"
-      ask:
-        type: DOUBLE
-        description: "Ask yield (if available)"
-      source:
-        type: VARCHAR
-        description: "FRED (published CMT), UST (Treasury direct), FITTED (model-derived)"
-      _loaded_at:
-        type: TIMESTAMP
-        description: "ETL timestamp"
-    partition_by: [curve_type]
-    indexes:
-      - columns: [date, tenor, curve_type]
-        description: "Primary query pattern for curve operations"
-    examples:
-      - "Daily CMT curve from FRED (11 tenors)"
-      - "Fitted zero curve from Nelson-Siegel-Svensson model"
-      - "Par curve for bond pricing"
-
-  - name: us_swap_rates
-    description: >
-      Interest rate swap curves (SOFR OIS, legacy LIBOR). Multiple tenors per date.
-      Used for swap valuation, hedge ratio calculation, and relative value analysis vs Treasuries.
-    schema:
-      date:
-        type: DATE
-        description: "Curve date"
-      tenor:
-        type: VARCHAR
-        description: "Swap tenor (e.g., '1Y', '2Y', '5Y', '10Y', '30Y')"
-      rate:
-        type: DOUBLE
-        description: "Swap fixed rate in decimal (0.0412 = 4.12%)"
-      curve_type:
-        type: VARCHAR
-        description: "SOFR_OIS, LIBOR (legacy), FED_FUNDS_OIS"
-      quote_type:
-        type: VARCHAR
-        description: "MID, BID, ASK"
-      source:
-        type: VARCHAR
-        description: "DTCC, Bloomberg, ICAP, etc."
-      _loaded_at:
-        type: TIMESTAMP
-        description: "ETL timestamp"
-    partition_by: [curve_type]
-    examples:
-      - "SOFR OIS curve (1M-30Y)"
-      - "Legacy 3M LIBOR swap curve"
-
-  - name: us_swaption_vols
-    description: >
-      Swaption implied volatilities. Three-dimensional surface: expiry × tenor × strike.
-      Used for swaption pricing (SABR model), volatility trading, and hedging.
-    schema:
-      date:
-        type: DATE
-        description: "Volatility surface date"
-      expiry:
-        type: VARCHAR
-        description: "Option expiry (e.g., '1M', '3M', '6M', '1Y', '2Y', '5Y', '10Y')"
-      tenor:
-        type: VARCHAR
-        description: "Underlying swap tenor (e.g., '2Y', '5Y', '10Y', '30Y')"
-      strike:
-        type: VARCHAR
-        description: "Strike descriptor: 'ATM', 'ATM+25', 'ATM+50', 'ATM-25', or absolute rate"
-      vol_type:
-        type: VARCHAR
-        description: "NORMAL (basis points), LOGNORMAL (Black vol)"
-      volatility:
-        type: DOUBLE
-        description: "Implied volatility (bps for normal, decimal for lognormal)"
-      delta:
-        type: DOUBLE
-        description: "Option delta (for smile interpolation)"
-      source:
-        type: VARCHAR
-        description: "Bloomberg, ICAP, MarketAxess"
-      _loaded_at:
-        type: TIMESTAMP
-        description: "ETL timestamp"
-    partition_by: [date]
-    examples:
-      - "3M×10Y ATM swaption (3-month option on 10-year swap)"
-      - "1Y×5Y volatility smile (multiple strikes)"
-
-  - name: us_capfloor_vols
-    description: >
-      Interest rate cap and floor implied volatilities.
-      Used for cap/floor pricing and hedging structured products.
-    schema:
-      date:
-        type: DATE
-        description: "Volatility date"
-      tenor:
-        type: VARCHAR
-        description: "Cap/floor tenor (e.g., '1Y', '2Y', '5Y', '10Y')"
-      strike:
-        type: DOUBLE
-        description: "Strike rate in decimal"
-      instrument_type:
-        type: VARCHAR
-        description: "CAP or FLOOR"
-      volatility:
-        type: DOUBLE
-        description: "Implied volatility"
-      curve_type:
-        type: VARCHAR
-        description: "SOFR, LIBOR (legacy)"
-      source:
-        type: VARCHAR
-        description: "Data provider"
-      _loaded_at:
-        type: TIMESTAMP
-        description: "ETL timestamp"
-    partition_by: [instrument_type]
-
   - name: us_economic_indicators
     description: >
       Macroeconomic time series with vintage tracking (real-time data).
       Each observation has realtime_start/end to track revisions.
       Use for nowcasting, policy analysis, and understanding data revision impact.
+    temporal_grain: MIXED # Can be MONTHLY, QUARTERLY, or ANNUAL
+    primary_date_column: observation_date
+    has_revisions: true
+    revision_start_column: realtime_start
+    revision_end_column: realtime_end
+    partition_by: [category]
     schema:
       series_id:
         type: VARCHAR
@@ -236,16 +106,102 @@ raw_tables:
       _loaded_at:
         type: TIMESTAMP
         description: "ETL timestamp"
-    partition_by: []
     examples:
       - "GDP with revision history"
       - "CPI (headline and core)"
       - "Unemployment rate vintages"
 
+  # ============================================
+  # CENTRAL BANK
+  # ============================================
+  - name: fomc_events
+    description: "Fed meeting dates and outcomes"
+    temporal_grain: EVENT_BASED
+    primary_date_column: meeting_date
+    has_revisions: false
+    partition_by: []
+    schema:
+      meeting_date:
+        type: DATE
+        description: "Date of FOMC meeting"
+      decision_type:
+        type: VARCHAR
+        description: "RATE_CHANGE, NO_CHANGE, QE, QT"
+      target_rate:
+        type: DOUBLE
+        description: "Target policy rate after meeting (decimal)"
+      rate_change:
+        type: DOUBLE
+        description: "Change in rate (basis points)"
+      dot_plot_median:
+        type: DOUBLE
+        description: "Median rate projection from dot plot"
+      statement_hawkish_score:
+        type: DOUBLE
+        description: "Text sentiment score (if computed)"
+      _loaded_at:
+        type: TIMESTAMP
+        description: "ETL timestamp"
+
+  # ============================================
+  # TREASURY MARKET DATA
+  # ============================================
+  - name: us_treasury_yields
+    description: >
+      Constant Maturity Treasury (CMT) yields and derived curves. Multiple tenors per date.
+      CMTs are interpolated/fitted yields representing what a Treasury would yield at exact maturities.
+      Use for curve analysis, term structure modeling, PCA, and yield curve strategies.
+    temporal_grain: DAILY
+    primary_date_column: date
+    has_revisions: false
+    partition_by: [curve_type]
+    schema:
+      series_id:
+        type: VARCHAR
+        description: "FRED series ID (e.g., 'DGS1MO', 'DGS10')"
+      date:
+        type: DATE
+        description: "Curve date"
+      tenor:
+        type: VARCHAR
+        description: "Time to maturity (e.g., '1M', '3M', '6M', '1Y', '2Y', '3Y', '5Y', '7Y', '10Y', '20Y', '30Y')"
+      yield:
+        type: DOUBLE
+        description: "Yield in decimal (0.0423 = 4.23%)"
+      indicator:
+        type: VARCHAR
+        description: "Human-readable name"
+      curve_type:
+        type: VARCHAR
+        description: "CMT (constant maturity), PAR (par curve), SPOT (zero curve), FORWARD (forward curve)"
+      bid:
+        type: DOUBLE
+        description: "Bid yield (if available)"
+      ask:
+        type: DOUBLE
+        description: "Ask yield (if available)"
+      source:
+        type: VARCHAR
+        description: "FRED (published CMT), UST (Treasury direct), FITTED (model-derived)"
+      _loaded_at:
+        type: TIMESTAMP
+        description: "ETL timestamp"
+    indexes:
+      - columns: [date, tenor, curve_type]
+        description: "Primary query pattern for curve operations"
+    examples:
+      - "Daily CMT curve from FRED (11 tenors)"
+      - "Fitted zero curve from Nelson-Siegel-Svensson model"
+      - "Par curve for bond pricing"
+
   - name: us_treasury_prices
     description: >
       Actual traded Treasury security prices and yields by CUSIP.
       Use for fitting yield curves, relative value analysis, and liquidity studies.
+    temporal_grain: DAILY
+    primary_date_column: date
+    has_revisions: false
+    partition_by: [date]
     schema:
       cusip:
         type: VARCHAR
@@ -283,15 +239,18 @@ raw_tables:
       _loaded_at:
         type: TIMESTAMP
         description: "ETL timestamp"
-    partition_by: [date]
     indexes:
       - columns: [cusip, date]
         description: "Primary lookup pattern"
 
-  - name: us_auctions
+  - name: us_treasury_auctions
     description: >
       Treasury auction results. Captures primary market issuance data.
       Use for supply analysis, auction tail studies, and dealer positioning.
+    temporal_grain: EVENT_BASED
+    primary_date_column: auction_date
+    has_revisions: false
+    partition_by: [security_type]
     schema:
       cusip:
         type: VARCHAR
@@ -335,12 +294,18 @@ raw_tables:
       _loaded_at:
         type: TIMESTAMP
         description: "ETL timestamp"
-    partition_by: [auction_date]
 
+  # ============================================
+  # INTEREST RATE LINEAR DERIVATIVES
+  # ============================================
   - name: us_treasury_futures
     description: >
       Treasury futures contracts (ZT, ZF, ZN, TN, ZB, UB).
       Essential for basis trading, hedging, and liquidity analysis.
+    temporal_grain: DAILY
+    primary_date_column: date
+    has_revisions: false
+    partition_by: [contract_type]
     schema:
       contract_code:
         type: VARCHAR
@@ -350,63 +315,204 @@ raw_tables:
         description: "Delivery month (H25, M25, U25, Z25)"
       date:
         type: DATE
+        description: "Trading date"
       price:
         type: DOUBLE
         description: "Settlement or last trade price"
       open:
         type: DOUBLE
+        description: "Opening price"
       high:
         type: DOUBLE
+        description: "High price"
       low:
         type: DOUBLE
+        description: "Low price"
       volume:
         type: BIGINT
+        description: "Trading volume"
       open_interest:
         type: BIGINT
+        description: "Open interest"
       settlement:
         type: DOUBLE
+        description: "Settlement price"
       prior_settlement:
         type: DOUBLE
+        description: "Previous day settlement"
       contract_type:
         type: VARCHAR
         description: "2Y, 5Y, 10Y, 30Y, ULTRA"
-    partition_by: [contract_type]
+      _loaded_at:
+        type: TIMESTAMP
+        description: "ETL timestamp"
 
+  - name: us_swap_rates
+    description: >
+      Interest rate swap curves (SOFR OIS, legacy LIBOR). Multiple tenors per date.
+      Used for swap valuation, hedge ratio calculation, and relative value analysis vs Treasuries.
+    temporal_grain: DAILY
+    primary_date_column: date
+    has_revisions: false
+    partition_by: [curve_type]
+    schema:
+      date:
+        type: DATE
+        description: "Curve date"
+      tenor:
+        type: VARCHAR
+        description: "Swap tenor (e.g., '1Y', '2Y', '5Y', '10Y', '30Y')"
+      rate:
+        type: DOUBLE
+        description: "Swap fixed rate in decimal (0.0412 = 4.12%)"
+      curve_type:
+        type: VARCHAR
+        description: "SOFR_OIS, LIBOR (legacy), FED_FUNDS_OIS"
+      quote_type:
+        type: VARCHAR
+        description: "MID, BID, ASK"
+      source:
+        type: VARCHAR
+        description: "DTCC, Bloomberg, ICAP, etc."
+      _loaded_at:
+        type: TIMESTAMP
+        description: "ETL timestamp"
+    examples:
+      - "SOFR OIS curve (1M-30Y)"
+      - "Legacy 3M LIBOR swap curve"
+
+  # ============================================
+  # INTEREST RATE VOL DERIVATIVES
+  # ============================================
+  - name: us_swaption_vols
+    description: >
+      Swaption implied volatilities. Three-dimensional surface: expiry × tenor × strike.
+      Used for swaption pricing (SABR model), volatility trading, and hedging.
+    temporal_grain: DAILY
+    primary_date_column: date
+    has_revisions: false
+    partition_by: [date]
+    schema:
+      date:
+        type: DATE
+        description: "Volatility surface date"
+      expiry:
+        type: VARCHAR
+        description: "Option expiry (e.g., '1M', '3M', '6M', '1Y', '2Y', '5Y', '10Y')"
+      tenor:
+        type: VARCHAR
+        description: "Underlying swap tenor (e.g., '2Y', '5Y', '10Y', '30Y')"
+      strike:
+        type: VARCHAR
+        description: "Strike descriptor: 'ATM', 'ATM+25', 'ATM+50', 'ATM-25', or absolute rate"
+      vol_type:
+        type: VARCHAR
+        description: "NORMAL (basis points), LOGNORMAL (Black vol)"
+      volatility:
+        type: DOUBLE
+        description: "Implied volatility (bps for normal, decimal for lognormal)"
+      delta:
+        type: DOUBLE
+        description: "Option delta (for smile interpolation)"
+      source:
+        type: VARCHAR
+        description: "Bloomberg, ICAP, MarketAxess"
+      _loaded_at:
+        type: TIMESTAMP
+        description: "ETL timestamp"
+    examples:
+      - "3M×10Y ATM swaption (3-month option on 10-year swap)"
+      - "1Y×5Y volatility smile (multiple strikes)"
+
+  - name: us_capfloor_vols
+    description: >
+      Interest rate cap and floor implied volatilities.
+      Used for cap/floor pricing and hedging structured products.
+    temporal_grain: DAILY
+    primary_date_column: date
+    has_revisions: false
+    partition_by: [instrument_type]
+    schema:
+      date:
+        type: DATE
+        description: "Volatility date"
+      tenor:
+        type: VARCHAR
+        description: "Cap/floor tenor (e.g., '1Y', '2Y', '5Y', '10Y')"
+      strike:
+        type: DOUBLE
+        description: "Strike rate in decimal"
+      instrument_type:
+        type: VARCHAR
+        description: "CAP or FLOOR"
+      volatility:
+        type: DOUBLE
+        description: "Implied volatility"
+      curve_type:
+        type: VARCHAR
+        description: "SOFR, LIBOR (legacy)"
+      source:
+        type: VARCHAR
+        description: "Data provider"
+      _loaded_at:
+        type: TIMESTAMP
+        description: "ETL timestamp"
+
+  # ============================================
+  # DERIVED ANALYTICS
+  # ============================================
   - name: calculated_spreads
     description: >
       Pre-computed spread relationships for RV trading.
       Butterfly, curve, swap spreads, basis.
+    temporal_grain: DAILY
+    primary_date_column: date
+    has_revisions: false
+    partition_by: [spread_type]
     schema:
       date:
         type: DATE
+        description: "Calculation date"
       spread_type:
         type: VARCHAR
         description: "BUTTERFLY, CURVE, SWAP_SPREAD, FUT_CASH_BASIS, TED"
       tenor_1:
         type: VARCHAR
+        description: "First leg tenor"
       tenor_2:
         type: VARCHAR
+        description: "Second leg tenor"
       tenor_3:
         type: VARCHAR
-        description: "For butterflies (nullable for 2-leg spreads)"
+        description: "Third leg tenor (for butterflies, nullable for 2-leg spreads)"
       spread_value:
         type: DOUBLE
-        description: "In basis points or native units"
+        description: "Spread value in basis points or native units"
       z_score_20d:
         type: DOUBLE
+        description: "20-day rolling z-score"
       z_score_60d:
         type: DOUBLE
+        description: "60-day rolling z-score"
       percentile_1y:
         type: DOUBLE
-    partition_by: [spread_type]
+        description: "1-year historical percentile"
+      _loaded_at:
+        type: TIMESTAMP
+        description: "ETL timestamp"
 
   - name: cftc_positioning
     description: >
       CFTC Commitment of Traders data for Treasury futures.
       Use for sentiment analysis and contrarian signals.
+    temporal_grain: WEEKLY
+    primary_date_column: report_date
+    has_revisions: false
+    partition_by: [contract]
     schema:
       report_date:
         type: DATE
+        description: "CFTC report date (Tuesday)"
       contract:
         type: VARCHAR
         description: "2Y, 5Y, 10Y, 30Y, ULTRA"
@@ -415,98 +521,98 @@ raw_tables:
         description: "DEALER, ASSET_MANAGER, LEVERAGED, OTHER"
       long_positions:
         type: BIGINT
+        description: "Long positions (contracts)"
       short_positions:
         type: BIGINT
+        description: "Short positions (contracts)"
       net_positions:
         type: BIGINT
+        description: "Net positions (long - short)"
       change_long:
         type: BIGINT
+        description: "Change in long positions"
       change_short:
         type: BIGINT
-    partition_by: [contract]
+        description: "Change in short positions"
+      _loaded_at:
+        type: TIMESTAMP
+        description: "ETL timestamp"
 
   - name: realized_volatility
     description: >
       Historical volatility calculations across instruments.
       Use for vol regime classification and options trading.
+    temporal_grain: DAILY
+    primary_date_column: date
+    has_revisions: false
+    partition_by: [instrument]
     schema:
       date:
         type: DATE
+        description: "Calculation date"
       instrument:
         type: VARCHAR
-        description: "10Y UST, ZN, 2s10s, etc."
+        description: "Instrument identifier (e.g., '10Y_UST', 'ZN', '2s10s')"
       window:
         type: INTEGER
-        description: "Lookback period (20, 60, 252)"
+        description: "Lookback window in days (20, 60, 252)"
       realized_vol:
         type: DOUBLE
-        description: "Annualized realized volatility"
+        description: "Annualized realized volatility (decimal)"
       realized_vol_bp:
         type: DOUBLE
         description: "For rates: volatility in basis points"
-    partition_by: [instrument]
-
-  - name: fomc_events
-    description: "Fed meeting dates and outcomes"
-    schema:
-      meeting_date:
-        type: DATE
-      decision_type:
-        type: VARCHAR
-        description: "RATE_CHANGE, NO_CHANGE, QE, QT"
-      target_rate:
-        type: DOUBLE
-      rate_change:
-        type: DOUBLE
-      dot_plot_median:
-        type: DOUBLE
-        description: "Median rate projection"
-      statement_hawkish_score:
-        type: DOUBLE
-        description: "Text sentiment (if computed)"
-    partition_by: []
+      _loaded_at:
+        type: TIMESTAMP
+        description: "ETL timestamp"
 
   - name: fitted_curve_parameters
     description: >
       Stored parameters from curve fitting models (Nelson-Siegel-Svensson, Smith-Wilson, etc.).
       Use for model comparison, parameter stability analysis, and curve reconstruction.
+    temporal_grain: DAILY
+    primary_date_column: date
+    has_revisions: false
+    partition_by: [curve_name]
     schema:
       date:
         type: DATE
         description: "Curve date"
       curve_name:
         type: VARCHAR
-        description: "UST_SPOT, SOFR_OIS, etc."
+        description: "Curve identifier (e.g., 'UST_SPOT', 'SOFR_OIS')"
       model_type:
         type: VARCHAR
         description: "NELSON_SIEGEL_SVENSSON, SMITH_WILSON, DIEBOLD_LI, VASICEK"
       parameter_name:
         type: VARCHAR
-        description: "beta0, beta1, beta2, beta3, lambda1, lambda2, tau, etc."
+        description: "Parameter name (e.g., 'beta0', 'beta1', 'beta2', 'lambda1')"
       parameter_value:
         type: DOUBLE
         description: "Fitted parameter value"
       goodness_of_fit:
         type: DOUBLE
-        description: "RMSE, R-squared, or other fit metric"
+        description: "Model fit metric (RMSE, R-squared, etc.)"
       source:
         type: VARCHAR
         description: "FITTED"
       _loaded_at:
         type: TIMESTAMP
         description: "ETL timestamp"
-    partition_by: [curve_name, date]
     examples:
       - "NSS parameters for daily UST curve"
       - "Smith-Wilson UFR parameters"
 
-# Reference tables (populated by scripts, not DBT)
+# ============================================
+# REFERENCE TABLES
+# ============================================
+# Static or slowly-changing dimension tables
 reference_tables:
-  # series_id,indicator,frequency,unit,category,subcategory,active
   - name: us_economic
     description: >
       Master list of economic indicators tracked in us_economic_indicators.
       Use for metadata lookups, filtering, and ensuring consistent series usage.
+    temporal_grain: STATIC
     schema:
       series_id:
         type: VARCHAR
@@ -529,12 +635,16 @@ reference_tables:
       active:
         type: BOOLEAN
         description: "Currently tracked indicator"
+      _loaded_at:
+        type: TIMESTAMP
+        description: "ETL timestamp"
     partition_by: []
 
   - name: treasury_securities
     description: >
       Master list of Treasury securities with static attributes.
       Use for CUSIP lookups, security filtering, and maturity calculations.
+    temporal_grain: SLOWLY_CHANGING
     schema:
       cusip:
         type: VARCHAR
@@ -573,10 +683,11 @@ reference_tables:
 
   - name: countries
     description: "Country reference data for international rates (future use)"
+    temporal_grain: STATIC
     schema:
       country_code:
         type: VARCHAR
-        description: "ISO 3166-1 alpha-2 code"
+        description: "ISO 3166-1 alpha-2 code (primary key)"
       country_name:
         type: VARCHAR
         description: "Full country name"
@@ -588,10 +699,10 @@ reference_tables:
         description: "Central bank abbreviation (e.g., 'Fed', 'ECB')"
       default_currency:
         type: VARCHAR
-        description: "ISO currency code"
+        description: "ISO 4217 currency code"
       market_timezone:
         type: VARCHAR
-        description: "Primary market timezone"
+        description: "IANA timezone (e.g., 'America/New_York')"
       is_active:
         type: BOOLEAN
         description: "Actively tracked"
@@ -599,10 +710,11 @@ reference_tables:
 
   - name: sources
     description: "Data source metadata and reliability tracking"
+    temporal_grain: STATIC
     schema:
       source_code:
         type: VARCHAR
-        description: "Source identifier (e.g., 'FRED', 'BLOOMBERG', 'DTCC')"
+        description: "Source identifier (primary key, e.g., 'FRED', 'BLOOMBERG')"
       source_name:
         type: VARCHAR
         description: "Full source name"
@@ -627,13 +739,14 @@ reference_tables:
     description: >
       Market conventions for swap pricing (day count, payment frequency, etc.).
       Use for accurate swap valuation and cross-market comparison.
+    temporal_grain: STATIC
     schema:
       curve_type:
         type: VARCHAR
         description: "SOFR_OIS, LIBOR, FED_FUNDS_OIS"
       currency:
         type: VARCHAR
-        description: "USD, EUR, GBP, JPY"
+        description: "ISO 4217 currency code (USD, EUR, GBP, JPY)"
       day_count:
         type: VARCHAR
         description: "ACT/360, ACT/365, 30/360"
@@ -649,4 +762,57 @@ reference_tables:
       is_active:
         type: BOOLEAN
         description: "Currently traded"
+    partition_by: []
+
+  - name: date_dimension
+    description: >
+      Calendar table with business day flags and date attributes.
+      Use for date joins, business day calculations, and temporal aggregations.
+    temporal_grain: DAILY
+    schema:
+      date:
+        type: DATE
+        description: "Calendar date (primary key)"
+      year:
+        type: INTEGER
+        description: "Year (YYYY)"
+      quarter:
+        type: INTEGER
+        description: "Quarter (1-4)"
+      month:
+        type: INTEGER
+        description: "Month (1-12)"
+      day:
+        type: INTEGER
+        description: "Day of month (1-31)"
+      day_of_week:
+        type: INTEGER
+        description: "Day of week (1=Monday, 7=Sunday)"
+      day_name:
+        type: VARCHAR
+        description: "Day name (Monday, Tuesday, etc.)"
+      is_business_day:
+        type: BOOLEAN
+        description: "US bond market trading day"
+      is_month_end:
+        type: BOOLEAN
+        description: "Last calendar day of month"
+      is_quarter_end:
+        type: BOOLEAN
+        description: "Last calendar day of quarter"
+      is_year_end:
+        type: BOOLEAN
+        description: "Last calendar day of year"
+      is_holiday:
+        type: BOOLEAN
+        description: "US federal holiday"
+      holiday_name:
+        type: VARCHAR
+        description: "Holiday name (if applicable)"
+      prior_business_day:
+        type: DATE
+        description: "Previous business day"
+      next_business_day:
+        type: DATE
+        description: "Next business day"
     partition_by: []
